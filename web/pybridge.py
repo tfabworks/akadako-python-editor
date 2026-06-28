@@ -377,18 +377,19 @@ def _dbg_collect_vars(frame):
     return out
 
 
-def run_debug(code, breakpoints, step):
+def run_debug(code, step):
     """Run user code under sys.settrace for step / breakpoint debugging.
 
     Pauses on every line (step mode) or at breakpoint lines, sends the current
     line + locals to the UI (dbgPause), then blocks on dbgWait until the UI
-    sends a command: 1=step, 2=continue, 3=stop.
+    sends a command: 1=step, 2=continue, 3=stop. Breakpoints are read live each
+    line via dbgIsBreakpoint (a shared bitmap the UI updates), so toggling a
+    breakpoint mid-run takes effect immediately.
     """
     import sys
     import json
-    from js import dbgPause, dbgWait
+    from js import dbgPause, dbgWait, dbgIsBreakpoint
 
-    bps = set(int(b) for b in (breakpoints or []))
     state = {"mode": "step" if step else "run"}
 
     def _pause(lineno, frame):
@@ -403,7 +404,7 @@ def run_debug(code, breakpoints, step):
             return None          # don't trace into library code (fast)
         if event == "line":
             ln = frame.f_lineno
-            if state["mode"] == "step" or ln in bps:
+            if state["mode"] == "step" or dbgIsBreakpoint(ln):
                 _pause(ln, frame)
         return tracer
 

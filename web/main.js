@@ -36,8 +36,10 @@ const shareSAB = new SharedArrayBuffer(SHARE_HDR + SHARE_CAP);
 const shareCtrl = new Int32Array(shareSAB, 0, 4);  // [0]=connected [1]=seq [2]=len
 const shareData = new Uint8Array(shareSAB, SHARE_HDR, SHARE_CAP);
 
-const dbgSAB = new SharedArrayBuffer(16);          // デバッガ制御
+const BP_MAX = 4096;                                // ブレークポイント行ビットマップの上限
+const dbgSAB = new SharedArrayBuffer(16 + BP_MAX); // デバッガ制御 + bpビットマップ
 const dbgCtrl = new Int32Array(dbgSAB, 0, 4);      // [0]=command (1=step,2=continue,3=stop)
+const bpMap = new Uint8Array(dbgSAB, 16, BP_MAX);  // bpMap[行番号]=1 ならブレークポイント（実行中もライブ反映）
 
 // --- DOM --------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -103,15 +105,18 @@ cm.on("change", (_cmi, change) => {
 const breakpoints = new Set();   // 1-based line numbers
 cm.on("gutterClick", (cmi, n) => {
   const info = cmi.lineInfo(n);
+  const line = n + 1;
   if (info.gutterMarkers && info.gutterMarkers.breakpoints) {
     cmi.setGutterMarker(n, "breakpoints", null);
-    breakpoints.delete(n + 1);
+    breakpoints.delete(line);
+    if (line < BP_MAX) Atomics.store(bpMap, line, 0);   // 実行中でも即反映
   } else {
     const dot = document.createElement("div");
     dot.className = "cm-bp";
     dot.textContent = "●";
     cmi.setGutterMarker(n, "breakpoints", dot);
-    breakpoints.add(n + 1);
+    breakpoints.add(line);
+    if (line < BP_MAX) Atomics.store(bpMap, line, 1);   // 実行中でも即反映
   }
 });
 
@@ -547,7 +552,7 @@ function debugRun() {
   clearWatches();
   clearErrorLine();
   log("\n🐞 デバッグ実行（行番号の左をクリックでブレークポイント設定）\n", "muted");
-  worker.postMessage({ type: "run-debug", code: cm.getValue(), breakpoints: [...breakpoints], step: true });
+  worker.postMessage({ type: "run-debug", code: cm.getValue(), step: true });
 }
 debugBtn.addEventListener("click", debugRun);
 $("dbg-step").addEventListener("click", () => sendDbg(1));

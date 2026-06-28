@@ -21,6 +21,7 @@ let readCount = 0;           // worker-local read cursor
 let shareCtrl = null;        // Int32Array over shareSAB: [0]=connected [1]=seq [2]=len
 let shareData = null;        // Uint8Array over shareSAB data region (UTF-8 JSON)
 let dbgCtrl = null;          // Int32Array over dbgSAB: [0]=command (0=wait,1=step,2=continue,3=stop)
+let bpMap = null;            // Uint8Array over dbgSAB: bpMap[line]=1 -> breakpoint (live)
 
 // Files of the vendored akadako package + this PoC's bridge, written into the
 // Pyodide virtual FS so `import akadako` works offline.
@@ -88,6 +89,7 @@ self.shareReadValues = () => {
 // Step debugger: send the paused line + locals to the UI, then block until the
 // UI writes a command (1=step, 2=continue, 3=stop) into dbgCtrl.
 self.dbgPause = (line, varsJson) => post("dbg-pause", { line, vars: varsJson });
+self.dbgIsBreakpoint = (line) => (bpMap && line >= 0 && line < bpMap.length ? Atomics.load(bpMap, line) : 0);
 self.dbgWait = () => {
   Atomics.store(dbgCtrl, 0, 0);
   while (Atomics.load(dbgCtrl, 0) === 0) {
@@ -106,6 +108,7 @@ async function boot(inSAB, irqSAB, shareSAB, dbgSAB) {
   shareCtrl = new Int32Array(shareSAB, 0, 4);
   shareData = new Uint8Array(shareSAB, 16, shareSAB.byteLength - 16);
   dbgCtrl = new Int32Array(dbgSAB, 0, 4);
+  bpMap = new Uint8Array(dbgSAB, 16, dbgSAB.byteLength - 16);
 
   pyodide = await loadPyodide({ indexURL: "/web/vendor/pyodide/" });
   pyodide.setInterruptBuffer(new Uint8Array(irqSAB));
@@ -155,9 +158,9 @@ async function run(code) {
   post("done", {});
 }
 
-async function runDebug(code, breakpoints, step) {
+async function runDebug(code, step) {
   try {
-    pyodide.globals.set("__dbg_args", JSON.stringify({ code, breakpoints, step }));
+    pyodide.globals.set("__dbg_args", JSON.stringify({ code, step }));
     await pyodide.runPythonAsync("import pybridge, json; pybridge.run_debug(**json.loads(__dbg_args))");
   } catch (err) {
     reportRunError(err);
@@ -173,7 +176,7 @@ self.onmessage = async (e) => {
     } else if (msg.type === "run") {
       await run(msg.code);
     } else if (msg.type === "run-debug") {
-      await runDebug(msg.code, msg.breakpoints, msg.step);
+      await runDebug(msg.code, msg.step);
     } else if (msg.type === "probe") {
       try {
         const json = await pyodide.runPythonAsync("import pybridge; pybridge.probe_sensors()");
