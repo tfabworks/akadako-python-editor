@@ -359,6 +359,62 @@ def probe_sensors():
     return json.dumps(available)
 
 
+def _dbg_collect_vars(frame):
+    """Snapshot the simple local variables at a pause point (for display)."""
+    out = []
+    for k, v in list(frame.f_locals.items()):
+        if k.startswith("__"):
+            continue
+        try:
+            if isinstance(v, bool) or isinstance(v, (int, float, str)):
+                out.append([k, repr(v)])
+            elif isinstance(v, (list, tuple, dict)):
+                s = repr(v)
+                out.append([k, s[:60] + ("…" if len(s) > 60 else "")])
+            # objects / functions / modules are skipped to keep it readable
+        except Exception:
+            pass
+    return out
+
+
+def run_debug(code, breakpoints, step):
+    """Run user code under sys.settrace for step / breakpoint debugging.
+
+    Pauses on every line (step mode) or at breakpoint lines, sends the current
+    line + locals to the UI (dbgPause), then blocks on dbgWait until the UI
+    sends a command: 1=step, 2=continue, 3=stop.
+    """
+    import sys
+    import json
+    from js import dbgPause, dbgWait
+
+    bps = set(int(b) for b in (breakpoints or []))
+    state = {"mode": "step" if step else "run"}
+
+    def _pause(lineno, frame):
+        dbgPause(lineno, json.dumps(_dbg_collect_vars(frame), ensure_ascii=False))
+        cmd = int(dbgWait())
+        if cmd == 3:
+            raise KeyboardInterrupt()
+        state["mode"] = "step" if cmd == 1 else "run"
+
+    def tracer(frame, event, arg):
+        if frame.f_code.co_filename != "<exec>":
+            return None          # don't trace into library code (fast)
+        if event == "line":
+            ln = frame.f_lineno
+            if state["mode"] == "step" or ln in bps:
+                _pause(ln, frame)
+        return tracer
+
+    compiled = compile(code, "<exec>", "exec")
+    sys.settrace(tracer)
+    try:
+        exec(compiled, {"__name__": "__main__"})
+    finally:
+        sys.settrace(None)
+
+
 def install():
     """Patch akadako + stdlib so the library runs in the browser worker."""
     # A stub so `import rtmidi` (lazy, inside the original find_and_open) never

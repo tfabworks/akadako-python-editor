@@ -20,6 +20,7 @@ let ring = null;             // Uint8Array view over inSAB data region
 let readCount = 0;           // worker-local read cursor
 let shareCtrl = null;        // Int32Array over shareSAB: [0]=connected [1]=seq [2]=len
 let shareData = null;        // Uint8Array over shareSAB data region (UTF-8 JSON)
+let dbgCtrl = null;          // Int32Array over dbgSAB: [0]=command (0=wait,1=step,2=continue,3=stop)
 
 // Files of the vendored akadako package + this PoC's bridge, written into the
 // Pyodide virtual FS so `import akadako` works offline.
@@ -84,13 +85,27 @@ self.shareReadValues = () => {
   return n ? new TextDecoder().decode(shareData.subarray(0, n)) : "";
 };
 
+// Step debugger: send the paused line + locals to the UI, then block until the
+// UI writes a command (1=step, 2=continue, 3=stop) into dbgCtrl.
+self.dbgPause = (line, varsJson) => post("dbg-pause", { line, vars: varsJson });
+self.dbgWait = () => {
+  Atomics.store(dbgCtrl, 0, 0);
+  while (Atomics.load(dbgCtrl, 0) === 0) {
+    Atomics.wait(dbgCtrl, 0, 0, 250);   // capped so it stays responsive
+  }
+  const cmd = Atomics.load(dbgCtrl, 0);
+  Atomics.store(dbgCtrl, 0, 0);
+  return cmd;
+};
+
 // --- bootstrap --------------------------------------------------------------
 
-async function boot(inSAB, irqSAB, shareSAB) {
+async function boot(inSAB, irqSAB, shareSAB, dbgSAB) {
   ctrl = new Int32Array(inSAB, 0, HDR / 4);
   ring = new Uint8Array(inSAB, HDR, RING);
   shareCtrl = new Int32Array(shareSAB, 0, 4);
   shareData = new Uint8Array(shareSAB, 16, shareSAB.byteLength - 16);
+  dbgCtrl = new Int32Array(dbgSAB, 0, 4);
 
   pyodide = await loadPyodide({ indexURL: "/web/vendor/pyodide/" });
   pyodide.setInterruptBuffer(new Uint8Array(irqSAB));
@@ -118,33 +133,47 @@ pybridge.install()
 
 // --- run / interrupt-reset --------------------------------------------------
 
+function reportRunError(err) {
+  const msg = String((err && err.message) || err);
+  const interrupted = (err && err.type === "KeyboardInterrupt") || msg.includes("KeyboardInterrupt");
+  if (interrupted) {
+    post("stdout", { text: "■ 停止しました\n" });
+  } else {
+    post("stderr", { text: msg + "\n" });
+    // Pull the user's line number from the traceback (user code runs as "<exec>").
+    const hits = [...msg.matchAll(/File "<exec>", line (\d+)/g)];
+    if (hits.length) post("error-line", { line: parseInt(hits[hits.length - 1][1], 10) });
+  }
+}
+
 async function run(code) {
   try {
     await pyodide.runPythonAsync(code);
-    post("done", {});
   } catch (err) {
-    const msg = String((err && err.message) || err);
-    // Stop button raises KeyboardInterrupt -- show a calm message, not a traceback.
-    const interrupted = (err && err.type === "KeyboardInterrupt") || msg.includes("KeyboardInterrupt");
-    if (interrupted) {
-      post("stdout", { text: "■ 停止しました\n" });
-    } else {
-      post("stderr", { text: msg + "\n" });
-      // Pull the user's line number from the traceback (user code runs as "<exec>").
-      const hits = [...msg.matchAll(/File "<exec>", line (\d+)/g)];
-      if (hits.length) post("error-line", { line: parseInt(hits[hits.length - 1][1], 10) });
-    }
-    post("done", {});
+    reportRunError(err);
   }
+  post("done", {});
+}
+
+async function runDebug(code, breakpoints, step) {
+  try {
+    pyodide.globals.set("__dbg_args", JSON.stringify({ code, breakpoints, step }));
+    await pyodide.runPythonAsync("import pybridge, json; pybridge.run_debug(**json.loads(__dbg_args))");
+  } catch (err) {
+    reportRunError(err);
+  }
+  post("done", {});
 }
 
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
     if (msg.type === "boot") {
-      await boot(msg.inSAB, msg.irqSAB, msg.shareSAB);
+      await boot(msg.inSAB, msg.irqSAB, msg.shareSAB, msg.dbgSAB);
     } else if (msg.type === "run") {
       await run(msg.code);
+    } else if (msg.type === "run-debug") {
+      await runDebug(msg.code, msg.breakpoints, msg.step);
     } else if (msg.type === "probe") {
       try {
         const json = await pyodide.runPythonAsync("import pybridge; pybridge.probe_sensors()");

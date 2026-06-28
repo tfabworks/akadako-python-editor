@@ -132,6 +132,23 @@
     #refview .rsig { display: block; font-family: ui-monospace, Menlo, monospace; font-size: .92rem; color: #dcdcaa; }
     #refview .rdoc { font-size: .85rem; color: #999; }
     .cm-errorline { background: rgba(240, 90, 90, 0.22) !important; }
+    .cm-debugline { background: rgba(120, 180, 255, 0.25) !important; }
+    .breakpoints { width: 1.1em; }
+    .cm-bp { color: #f06292; padding-left: 2px; cursor: pointer; }
+    #debugbar {
+      position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 40;
+      display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; max-width: 92vw;
+      padding: .5rem .75rem; background: #2d2d30; border: 1px solid #5a5a5a;
+      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.45);
+    }
+    #debugbar[hidden] { display: none; }
+    #debugbar #dbg-status { font-size: .95rem; color: #ddd; }
+    #debugbar button { font-size: .9rem; padding: .3rem .8rem; }
+    #debugbar #dbg-stop { background: #a33; border-color: #a33; }
+    #dbg-vars {
+      font-family: ui-monospace, Menlo, monospace; font-size: .85rem; color: #9cdcfe;
+      max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .CodeMirror-hints { font-size: 15px; max-height: 22em; }
     .CodeMirror-hint { padding: .15rem .6rem; }
 
@@ -179,6 +196,7 @@
     <button id="connect">ボードに接続</button>
     <button id="run" disabled>実行 ▶ (Ctrl+Enter)</button>
     <button id="stop" disabled>停止 ◼</button>
+    <button id="debug" disabled>デバッグ 🐞</button>
     <button id="save">保存</button>
     <button id="open">開く</button>
     <button id="sample">サンプル</button>
@@ -199,6 +217,13 @@
       <div id="refview" hidden></div>
     </aside>
   </main>
+  <div id="debugbar" hidden>
+    <span id="dbg-status">⏸ 停止中</span>
+    <button id="dbg-step">次へ</button>
+    <button id="dbg-continue">続行</button>
+    <button id="dbg-stop">停止</button>
+    <span id="dbg-vars"></span>
+  </div>
   <div id="modal" class="modal" hidden>
     <div class="modal-box">
       <h3 id="modal-title"></h3>

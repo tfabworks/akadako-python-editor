@@ -36,6 +36,9 @@ const shareSAB = new SharedArrayBuffer(SHARE_HDR + SHARE_CAP);
 const shareCtrl = new Int32Array(shareSAB, 0, 4);  // [0]=connected [1]=seq [2]=len
 const shareData = new Uint8Array(shareSAB, SHARE_HDR, SHARE_CAP);
 
+const dbgSAB = new SharedArrayBuffer(16);          // デバッガ制御
+const dbgCtrl = new Int32Array(dbgSAB, 0, 4);      // [0]=command (1=step,2=continue,3=stop)
+
 // --- DOM --------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const consoleEl = $("console");
@@ -75,6 +78,7 @@ const cm = CodeMirror.fromTextArea($("editor"), {
   mode: "python",
   theme: "material-darker",
   lineNumbers: true,
+  gutters: ["CodeMirror-linenumbers", "breakpoints"],
   indentUnit: 4,
   tabSize: 4,
   matchBrackets: true,
@@ -93,6 +97,22 @@ cm.setValue(STARTER_CODE);
 let editorPristine = true;
 cm.on("change", (_cmi, change) => {
   if (change.origin !== "setValue") editorPristine = false;
+});
+
+// Breakpoints: click the gutter to toggle a red dot on a line.
+const breakpoints = new Set();   // 1-based line numbers
+cm.on("gutterClick", (cmi, n) => {
+  const info = cmi.lineInfo(n);
+  if (info.gutterMarkers && info.gutterMarkers.breakpoints) {
+    cmi.setGutterMarker(n, "breakpoints", null);
+    breakpoints.delete(n + 1);
+  } else {
+    const dot = document.createElement("div");
+    dot.className = "cm-bp";
+    dot.textContent = "●";
+    cmi.setGutterMarker(n, "breakpoints", dot);
+    breakpoints.add(n + 1);
+  }
 });
 
 // Board-tailored starter generation. Order = priority; one line per label.
@@ -407,11 +427,13 @@ worker.onmessage = (e) => {
     case "ready":
       workerReady = true;
       runBtn.disabled = false;
+      debugBtn.disabled = false;
       setStatus("Pyodide 準備完了 —「ボードに接続」してから「実行」", false);
       break;
     case "stdout": log(m.text); break;
     case "stderr": log(m.text, "err"); break;
     case "error-line": markErrorLine(m.line); break;
+    case "dbg-pause": onDebugPause(m.line, m.vars); break;
     case "dbg": onDbg(m.name, m.value); break;
     case "midi-out": if (midiOut) midiOut.send(m.data); break;
     case "share-connect": openShare(m.url, m.groupId, true); break;
@@ -439,7 +461,9 @@ worker.onmessage = (e) => {
     case "done":
       running = false;
       runBtn.disabled = false;
+      debugBtn.disabled = false;
       stopBtn.disabled = true;
+      endDebug();
       break;
   }
 };
@@ -447,7 +471,7 @@ worker.onmessage = (e) => {
 // On iPad-non-Scrub we redirect to Scrub (see index.html); don't download
 // Pyodide (~13MB) behind the overlay.
 if (!window.__scrubRedirect) {
-  worker.postMessage({ type: "boot", inSAB, irqSAB, shareSAB });
+  worker.postMessage({ type: "boot", inSAB, irqSAB, shareSAB, dbgSAB });
   // Cache the runtime so subsequent loads are instant / offline (GIGA wifi).
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -468,10 +492,73 @@ function markErrorLine(n) {
   cm.scrollIntoView({ line: ln, ch: 0 }, 80);
 }
 
+// --- ステップ実行 / ブレークポイント -----------------------------------------
+let debugging = false;
+let dbgLine = null;
+const debugBtn = $("debug");
+const debugbar = $("debugbar");
+const dbgStatus = $("dbg-status");
+const dbgVars = $("dbg-vars");
+
+function clearDebugLine() {
+  if (dbgLine != null) { cm.removeLineClass(dbgLine, "background", "cm-debugline"); dbgLine = null; }
+}
+function markDebugLine(n) {
+  clearDebugLine();
+  const ln = n - 1;
+  if (ln < 0 || ln >= cm.lineCount()) return;
+  cm.addLineClass(ln, "background", "cm-debugline");
+  dbgLine = ln;
+  cm.scrollIntoView({ line: ln, ch: 0 }, 80);
+}
+function setDbgButtons(enabled) {
+  $("dbg-step").disabled = !enabled;
+  $("dbg-continue").disabled = !enabled;
+}
+function onDebugPause(line, varsJson) {
+  markDebugLine(line);
+  dbgStatus.textContent = "⏸ " + line + " 行目で停止";
+  let parts = [];
+  try { parts = JSON.parse(varsJson).map((kv) => kv[0] + "=" + kv[1]); } catch (e) {}
+  dbgVars.textContent = parts.length ? parts.join("   ") : "(変数なし)";
+  debugbar.hidden = false;
+  setDbgButtons(true);
+}
+function sendDbg(cmd) {
+  setDbgButtons(false);
+  clearDebugLine();
+  dbgStatus.textContent = "実行中…";
+  Atomics.store(dbgCtrl, 0, cmd);
+  Atomics.notify(dbgCtrl, 0);
+}
+function endDebug() {
+  debugging = false;
+  debugbar.hidden = true;
+  clearDebugLine();
+}
+function debugRun() {
+  if (running) return;
+  running = true;
+  debugging = true;
+  runBtn.disabled = true;
+  debugBtn.disabled = true;
+  stopBtn.disabled = false;
+  irq[0] = 0;
+  clearWatches();
+  clearErrorLine();
+  log("\n🐞 デバッグ実行（行番号の左をクリックでブレークポイント設定）\n", "muted");
+  worker.postMessage({ type: "run-debug", code: cm.getValue(), breakpoints: [...breakpoints], step: true });
+}
+debugBtn.addEventListener("click", debugRun);
+$("dbg-step").addEventListener("click", () => sendDbg(1));
+$("dbg-continue").addEventListener("click", () => sendDbg(2));
+$("dbg-stop").addEventListener("click", () => { irq[0] = 2; sendDbg(3); });
+
 function runCode() {
   if (running) return;
   running = true;
   runBtn.disabled = true;
+  debugBtn.disabled = true;
   stopBtn.disabled = false;
   irq[0] = 0;
   clearWatches();
@@ -481,6 +568,7 @@ function runCode() {
 }
 
 function stopCode() {
+  if (debugging) { irq[0] = 2; sendDbg(3); return; }  // wake a paused debugger too
   irq[0] = 2;                  // SIGINT -> KeyboardInterrupt in Pyodide
   Atomics.notify(ctrl, 0);     // wake the pump so it returns to Python
 }
