@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AkaDako Python (browser PoC)</title>
+
+  <!-- CodeMirror 5 (self-hosted, see fetch-vendor.sh; no build step) -->
+  <link rel="stylesheet" href="/web/vendor/codemirror/codemirror.min.css" />
+  <link rel="stylesheet" href="/web/vendor/codemirror/addon/hint/show-hint.min.css" />
+  <link rel="stylesheet" href="/web/vendor/codemirror/theme/material-darker.min.css" />
+  <script src="/web/vendor/codemirror/codemirror.min.js"></script>
+  <script src="/web/vendor/codemirror/mode/python/python.min.js"></script>
+  <script src="/web/vendor/codemirror/addon/hint/show-hint.min.js"></script>
+  <script src="/web/vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+  <script src="/web/vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; height: 100vh; display: flex; flex-direction: column;
+      font-family: system-ui, sans-serif; background: #1e1e1e; color: #ddd;
+    }
+    header {
+      display: flex; align-items: center; gap: .5rem;
+      padding: .5rem .75rem; background: #252526; border-bottom: 1px solid #333;
+    }
+    header h1 { font-size: 1.15rem; margin: 0 .75rem 0 0; font-weight: 600; }
+    button {
+      font: inherit; font-size: 1rem; padding: .45rem .9rem; border: 1px solid #444;
+      background: #333; color: #eee; border-radius: 4px; cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #3d3d3d; }
+    button:disabled { opacity: .45; cursor: default; }
+    #run { background: #0e639c; border-color: #0e639c; }
+    #save { margin-left: 1.4rem; }   /* 実行系 と 保存系 の区切り */
+    #sample { margin-left: 1.4rem; } /* 保存系 と サンプル の区切り */
+    #status { margin-left: auto; font-size: .95rem; }
+    #status.ok { color: #6ac46a; }
+    #status.warn { color: #d7a13b; }
+
+    main {
+      flex: 1; min-height: 0; display: grid;
+      grid-template-columns: 1fr 340px;
+      grid-template-rows: 1fr 220px;
+    }
+    #editorwrap { grid-column: 1; grid-row: 1; overflow: hidden; min-height: 0; }
+    .CodeMirror { height: 100%; font-size: 16px; line-height: 1.55; }
+    #console-wrap {
+      grid-column: 1; grid-row: 2; position: relative; min-height: 0;
+      display: flex; border-top: 1px solid #333;
+    }
+    #console {
+      flex: 1; margin: 0; padding: .75rem 5rem .75rem .75rem; overflow: auto;
+      white-space: pre-wrap; background: #181818;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 14px; line-height: 1.5;
+    }
+    #console .err { color: #f08585; }
+    #console .muted { color: #6a9955; }
+    #clear {
+      position: absolute; top: .4rem; right: .6rem; z-index: 5;
+      font-size: .85rem; padding: .25rem .6rem; opacity: .85;
+    }
+    #clear:hover { opacity: 1; }
+
+    aside#monitor {
+      grid-column: 2; grid-row: 1 / span 2; min-height: 0;
+      display: flex; flex-direction: column;
+      background: #202020; border-left: 1px solid #333;
+    }
+    #tabs { display: flex; border-bottom: 1px solid #333; }
+    #tabs .tab {
+      flex: 1; font: inherit; font-size: 1rem; padding: .55rem .5rem; margin: 0;
+      background: #202020; color: #aaa; border: none; border-bottom: 2px solid transparent;
+      border-radius: 0; cursor: pointer;
+    }
+    #tabs .tab:hover { background: #262626; }
+    #tabs .tab.active { color: #9cdcfe; background: #252526; border-bottom-color: #0e639c; }
+    #watchlist { overflow: auto; padding: .25rem 0; flex: 1; }
+    .watch {
+      display: grid; grid-template-columns: 1fr auto; align-items: center;
+      gap: .25rem .5rem; padding: .45rem .75rem; border-bottom: 1px solid #2a2a2a;
+    }
+    .watch .name {
+      font-family: ui-monospace, Menlo, monospace; font-size: 15px; color: #ccc;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .watch .val {
+      font-family: ui-monospace, Menlo, monospace; font-size: 18px;
+      color: #b5cea8; font-weight: 600; justify-self: end;
+    }
+    .watch canvas { grid-column: 1 / span 2; width: 100%; height: 30px; }
+    #monitor .empty { padding: .75rem; font-size: .95rem; color: #888; line-height: 1.6; }
+    #refview { overflow: auto; flex: 1; padding: .25rem .75rem 1rem; }
+    #refview[hidden], #watchlist[hidden] { display: none; }
+    #refview .rnote { font-size: .85rem; color: #888; margin: .4rem 0 .2rem; }
+    #refview h4 { margin: .9rem 0 .25rem; font-size: .9rem; color: #9cdcfe; }
+    #refview .ritem { padding: .35rem 0; border-bottom: 1px solid #2a2a2a; }
+    #refview .rsig { display: block; font-family: ui-monospace, Menlo, monospace; font-size: .92rem; color: #dcdcaa; }
+    #refview .rdoc { font-size: .85rem; color: #999; }
+    .CodeMirror-hints { font-size: 15px; max-height: 22em; }
+    .CodeMirror-hint { padding: .15rem .6rem; }
+
+    /* 保存・読み込みダイアログ */
+    .modal[hidden] { display: none; }
+    .modal {
+      position: fixed; inset: 0; z-index: 50; display: flex;
+      align-items: center; justify-content: center; background: rgba(0,0,0,.55);
+    }
+    .modal-box {
+      background: #252526; border: 1px solid #454545; border-radius: 8px;
+      min-width: 340px; max-width: 90vw; max-height: 80vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .modal-box h3 { margin: 0; padding: .8rem 1rem; font-size: 1.1rem; border-bottom: 1px solid #383838; }
+    .modal-body { padding: 1rem; overflow: auto; font-size: 1rem; }
+    .modal-body input {
+      width: 100%; font: inherit; font-size: 1rem; padding: .5rem;
+      background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 4px;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid #383838; }
+    .prog-row { display: flex; align-items: center; gap: .5rem; padding: .45rem 0; border-bottom: 1px solid #333; }
+    .prog-row .pname { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 1rem; word-break: break-all; }
+    .prog-row button { font-size: .9rem; padding: .3rem .7rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AkaDako Python</h1>
+    <button id="connect">ボードに接続</button>
+    <button id="run" disabled>実行 ▶ (Ctrl+Enter)</button>
+    <button id="stop" disabled>停止 ◼</button>
+    <button id="save">保存</button>
+    <button id="open">開く</button>
+    <button id="sample">サンプル</button>
+    <span id="status" class="warn">Pyodide を読み込み中…</span>
+  </header>
+  <main>
+    <div id="editorwrap"><textarea id="editor" spellcheck="false"></textarea></div>
+    <div id="console-wrap">
+      <button id="clear">クリア</button>
+      <pre id="console"></pre>
+    </div>
+    <aside id="monitor">
+      <div id="tabs">
+        <button id="tab-sensor" class="tab active">センサー</button>
+        <button id="tab-ref" class="tab">リファレンス</button>
+      </div>
+      <div id="watchlist"><div class="empty">プログラムを実行すると、センサーの読み取り値や monitor() の値がここにリアルタイムで表示されます。</div></div>
+      <div id="refview" hidden></div>
+    </aside>
+  </main>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
+  <script src="/web/akadako-api.js"></script>
+  <script src="/web/main.js"></script>
+</body>
+</html>

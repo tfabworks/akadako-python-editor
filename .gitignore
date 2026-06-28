@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+
+# Debug screenshots (local only)
+error2.png
+ok.png

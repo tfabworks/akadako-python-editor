@@ -1,0 +1,20 @@
+{
+  "_comment": "Create with: aws cloudfront create-response-headers-policy --response-headers-policy-config file://cloudfront-response-headers-policy.json  -- then attach the policy to your distribution's default cache behavior.",
+  "Name": "akadako-py-web-coop-coep",
+  "Comment": "Cross-origin isolation (SharedArrayBuffer) for akadako-py-web",
+  "CustomHeadersConfig": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Header": "Cross-Origin-Opener-Policy",
+        "Value": "same-origin",
+        "Override": true
+      },
+      {
+        "Header": "Cross-Origin-Embedder-Policy",
+        "Value": "require-corp",
+        "Override": true
+      }
+    ]
+  }
+}

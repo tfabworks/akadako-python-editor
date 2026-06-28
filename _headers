@@ -1,0 +1,9 @@
+# Cross-origin isolation (SharedArrayBuffer) for Netlify / Cloudflare Pages.
+# This file must sit at the published site root.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+# Long-cache the immutable vendored runtime (Pyodide / CodeMirror).
+/web/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
