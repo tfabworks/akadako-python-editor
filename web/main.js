@@ -443,7 +443,11 @@ worker.onmessage = (e) => {
   }
 };
 
-worker.postMessage({ type: "boot", inSAB, irqSAB, shareSAB });
+// On iPad-non-Scrub we redirect to Scrub (see index.html); don't download
+// Pyodide (~13MB) behind the overlay.
+if (!window.__scrubRedirect) {
+  worker.postMessage({ type: "boot", inSAB, irqSAB, shareSAB });
+}
 
 // --- controls ---------------------------------------------------------------
 function runCode() {
