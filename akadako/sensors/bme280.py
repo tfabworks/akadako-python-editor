@@ -13,6 +13,8 @@ Returned units:
 - read_humidity()    -> percent relative humidity (%RH)
 """
 
+import time
+
 BME280_ADDRESS = 0x76
 
 _REG_CHIP_ID = 0xD0
@@ -53,7 +55,15 @@ class BME280:
         return chip in (_CHIP_ID_BME280, _CHIP_ID_BMP280)
 
     def init(self):
-        chip = self.bus.read8(self.address, _REG_CHIP_ID)
+        # The chip-id read occasionally returns 0 on a transient I2C miss
+        # (the reply is dropped under load). Retry a few times before failing
+        # so one glitch doesn't kill the whole program.
+        chip = 0
+        for _ in range(5):
+            chip = self.bus.read8(self.address, _REG_CHIP_ID)
+            if chip in (_CHIP_ID_BME280, _CHIP_ID_BMP280):
+                break
+            time.sleep(0.03)
         if chip not in (_CHIP_ID_BME280, _CHIP_ID_BMP280):
             raise RuntimeError(
                 f"0x{self.address:x} is not BME280 (chip id 0x{chip:02x})"

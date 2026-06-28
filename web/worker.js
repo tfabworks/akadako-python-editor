@@ -126,8 +126,14 @@ async function run(code) {
     const msg = String((err && err.message) || err);
     // Stop button raises KeyboardInterrupt -- show a calm message, not a traceback.
     const interrupted = (err && err.type === "KeyboardInterrupt") || msg.includes("KeyboardInterrupt");
-    if (interrupted) post("stdout", { text: "■ 停止しました\n" });
-    else post("stderr", { text: msg + "\n" });
+    if (interrupted) {
+      post("stdout", { text: "■ 停止しました\n" });
+    } else {
+      post("stderr", { text: msg + "\n" });
+      // Pull the user's line number from the traceback (user code runs as "<exec>").
+      const hits = [...msg.matchAll(/File "<exec>", line (\d+)/g)];
+      if (hits.length) post("error-line", { line: parseInt(hits[hits.length - 1][1], 10) });
+    }
     post("done", {});
   }
 }

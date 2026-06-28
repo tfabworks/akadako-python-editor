@@ -411,6 +411,7 @@ worker.onmessage = (e) => {
       break;
     case "stdout": log(m.text); break;
     case "stderr": log(m.text, "err"); break;
+    case "error-line": markErrorLine(m.line); break;
     case "dbg": onDbg(m.name, m.value); break;
     case "midi-out": if (midiOut) midiOut.send(m.data); break;
     case "share-connect": openShare(m.url, m.groupId, true); break;
@@ -447,9 +448,26 @@ worker.onmessage = (e) => {
 // Pyodide (~13MB) behind the overlay.
 if (!window.__scrubRedirect) {
   worker.postMessage({ type: "boot", inSAB, irqSAB, shareSAB });
+  // Cache the runtime so subsequent loads are instant / offline (GIGA wifi).
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
 }
 
 // --- controls ---------------------------------------------------------------
+let errLine = null;
+function clearErrorLine() {
+  if (errLine != null) { cm.removeLineClass(errLine, "background", "cm-errorline"); errLine = null; }
+}
+function markErrorLine(n) {
+  clearErrorLine();
+  const ln = n - 1;
+  if (ln < 0 || ln >= cm.lineCount()) return;
+  cm.addLineClass(ln, "background", "cm-errorline");
+  errLine = ln;
+  cm.scrollIntoView({ line: ln, ch: 0 }, 80);
+}
+
 function runCode() {
   if (running) return;
   running = true;
@@ -457,6 +475,7 @@ function runCode() {
   stopBtn.disabled = false;
   irq[0] = 0;
   clearWatches();
+  clearErrorLine();
   log("\n▶ 実行開始\n", "muted");
   worker.postMessage({ type: "run", code: cm.getValue() });
 }

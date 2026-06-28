@@ -7,3 +7,7 @@
 # Long-cache the immutable vendored runtime (Pyodide / CodeMirror).
 /web/vendor/*
   Cache-Control: public, max-age=31536000, immutable
+
+# The service worker must not be cached long, so updates propagate.
+/sw.js
+  Cache-Control: no-cache
