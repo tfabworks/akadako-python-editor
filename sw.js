@@ -2,9 +2,10 @@
 // package so the ~13MB runtime downloads only once. Second load is instant and
 // works offline. Lives at the site root so its scope covers /web/ and /akadako/.
 //
-// Bump CACHE when assets change so clients refresh (deploys should also run a
-// CloudFront invalidation of /*).
-const CACHE = "akadako-py-v1";
+// App code (HTML/JS/.py) is network-first so updates are never a version behind;
+// the heavy immutable runtime (/web/vendor/) is cache-first. Offline falls back
+// to cache. Bump CACHE to force a clean refresh on deploy.
+const CACHE = "akadako-py-v2";
 
 const PRECACHE = [
   "/web/", "/web/index.html",
@@ -50,19 +51,32 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// Same-origin GET: stale-while-revalidate. Cross-origin (e.g. the share server)
-// is left to the network untouched.
+// Same-origin GET only. Cross-origin (e.g. the share server) is left untouched.
+//   /web/vendor/*  -> cache-first  (immutable ~13MB runtime; instant/offline)
+//   everything else -> network-first (always-fresh app code; cache = offline fallback)
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
-  if (new URL(req.url).origin !== location.origin) return;
-  e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(req);
-      const network = fetch(req)
-        .then((res) => { if (res && res.ok) cache.put(req, res.clone()); return res; })
-        .catch(() => cached);
-      return cached || network;
-    })
-  );
+  const url = new URL(req.url);
+  if (url.origin !== location.origin) return;
+
+  if (url.pathname.startsWith("/web/vendor/")) {
+    e.respondWith(caches.open(CACHE).then(async (cache) => {
+      const hit = await cache.match(req);
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res && res.ok) cache.put(req, res.clone());
+      return res;
+    }));
+  } else {
+    e.respondWith(caches.open(CACHE).then(async (cache) => {
+      try {
+        const res = await fetch(req);
+        if (res && res.ok) cache.put(req, res.clone());
+        return res;
+      } catch (err) {
+        return (await cache.match(req)) || Response.error();
+      }
+    }));
+  }
 });
