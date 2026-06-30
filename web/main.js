@@ -90,9 +90,40 @@ const cm = CodeMirror.fromTextArea($("editor"), {
     "Cmd-Enter": runCode,
     "Ctrl-Space": (cmi) => cmi.showHint({ hint: pyHint, completeSingle: false }),
     "Tab": (cmi) => cmi.replaceSelection("    "),
+    "Ctrl-/": toggleComment,
+    "Cmd-/": toggleComment,
   },
 });
 cm.setValue(STARTER_CODE);
+
+// Toggle "# " comments on the selected lines (or the current line). If every
+// non-blank target line is already commented, uncomment them; otherwise comment
+// them all at the shallowest indentation so the block stays aligned.
+function toggleComment(cmi) {
+  cmi.operation(() => {
+    for (const sel of cmi.listSelections()) {
+      const from = sel.from(), to = sel.to();
+      let endLine = to.line;
+      // A selection ending at column 0 doesn't really include that last line.
+      if (endLine > from.line && to.ch === 0) endLine--;
+
+      const lines = [];
+      for (let n = from.line; n <= endLine; n++) lines.push({ n, text: cmi.getLine(n) });
+      const target = lines.filter((l) => l.text.trim() !== "");
+      if (!target.length) continue;   // nothing but blank lines
+
+      if (target.every((l) => /^\s*#/.test(l.text))) {
+        for (const l of target) {
+          const stripped = l.text.replace(/^(\s*)#\s?/, "$1");
+          cmi.replaceRange(stripped, { line: l.n, ch: 0 }, { line: l.n, ch: l.text.length });
+        }
+      } else {
+        const indent = Math.min(...target.map((l) => l.text.match(/^\s*/)[0].length));
+        for (const l of target) cmi.replaceRange("# ", { line: l.n, ch: indent });
+      }
+    }
+  });
+}
 
 // Track whether the user has hand-edited the editor. We only auto-replace the
 // starter with a board-tailored version while it is still untouched.
