@@ -128,9 +128,17 @@ function toggleComment(cmi) {
 // Track whether the user has hand-edited the editor. We only auto-replace the
 // starter with a board-tailored version while it is still untouched.
 let editorPristine = true;
+let draftTimer = null;
 cm.on("change", (_cmi, change) => {
-  if (change.origin !== "setValue") editorPristine = false;
+  if (change.origin !== "setValue") {
+    editorPristine = false;
+    // 手で編集したらドラフトを自動保存（連打を抑えるため少し遅延）
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraft, 400);
+  }
 });
+// うっかり閉じた直前にも最新状態を確実に書き出す（localStorage は同期）
+window.addEventListener("beforeunload", saveDraft);
 
 // Breakpoints: click the gutter to toggle a red dot on a line.
 const breakpoints = new Set();   // 1-based line numbers
@@ -638,6 +646,25 @@ function defaultName() {
   return "プログラム" + i;
 }
 
+// --- ドラフト自動保存（うっかり閉じても続きから再開できるように）--------------
+// 名前付き保存(akadako_programs)とは別に、編集中の状態を1つだけ保持する。
+const DRAFT_KEY = "akadako_draft";
+function saveDraft() {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      code: cm.getValue(),
+      name: currentName,
+      edited: !editorPristine,   // 自動生成や初期表示のままなら復元を促さない
+      ts: Date.now(),
+    }));
+  } catch {}
+}
+function loadDraft() {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); }
+  catch { return null; }
+}
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch {} }
+
 function showModal(title, contentNode, actions) {
   modalTitle.textContent = title;
   modalBody.innerHTML = "";
@@ -672,6 +699,7 @@ function openSaveDialog() {
     if (!saveStore(s)) return;
     currentName = n;
     editorPristine = false;   // 保存したコードは自動生成で上書きしない
+    saveDraft();              // ドラフトにも名前を反映しておく
     closeModal();
     setStatus("保存しました: " + n, true);
   };
@@ -850,6 +878,34 @@ function onSampleClick() {
   startProbe();
 }
 $("sample").addEventListener("click", onSampleClick);
+
+// 再アクセス時：前回編集していたコードが残っていれば「続きから / 新規」を選ばせる。
+(function maybeRestoreDraft() {
+  const d = loadDraft();
+  if (!d || !d.edited || !d.code || !d.code.trim()) return;   // 編集実績がある時だけ
+  const msg = document.createElement("div");
+  msg.textContent =
+    "前回編集していたコード" + (d.name ? "「" + d.name + "」" : "") +
+    "が残っています。続きから編集しますか？";
+  showModal("おかえりなさい", msg, [
+    {
+      label: "続きから", primary: true, onClick: () => {
+        cm.setValue(d.code);
+        currentName = d.name || "";
+        editorPristine = false;   // 復元したコードは自動生成で上書きしない
+        closeModal();
+        setStatus("前回のコードを復元しました", true);
+      },
+    },
+    {
+      label: "新規で始める", onClick: () => {
+        clearDraft();
+        editorPristine = true;
+        closeModal();
+      },
+    },
+  ]);
+})();
 
 if (!crossOriginIsolated) {
   setStatus("クロスオリジン分離が無効です — serve.py 経由で開いてください（SharedArrayBuffer に必要）", false);
