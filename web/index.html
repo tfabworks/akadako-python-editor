@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AkaDako Python (browser PoC)</title>
+  <link rel="icon" href="https://699.jp/wp-content/themes/akadako/favicon.ico" />
 
   <!-- iPad の Safari/Chrome で開かれたら Scrub で開き直すよう促す。
        iPad の通常ブラウザは Web MIDI が無く AkaDako に接続できないため。
@@ -56,11 +57,21 @@
     header {
       display: flex; align-items: center; gap: .5rem;
       padding: .5rem .75rem; background: #252526; border-bottom: 1px solid #333;
+      overflow-x: auto;   /* 入りきらない時の最終手段: 横スクロール */
     }
-    header h1 { font-size: 1.15rem; margin: 0 .75rem 0 0; font-weight: 600; }
+    header h1 { font-size: 1.15rem; margin: 0 .75rem 0 0; font-weight: 600; flex: none; }
     button {
       font: inherit; font-size: 1rem; padding: .45rem .9rem; border: 1px solid #444;
       background: #333; color: #eee; border-radius: 4px; cursor: pointer;
+      white-space: nowrap;   /* 文字を2行に折り返さない */
+    }
+    header button { flex: none; }   /* ボタンを縮めず、つぶれて折り返るのを防ぐ */
+    /* 画面が狭い時はボタン自体を一回り小さくして1行に収める */
+    @media (max-width: 1100px) {
+      header { gap: .35rem; padding: .5rem .5rem; }
+      header h1 { font-size: 1rem; margin-right: .4rem; }
+      header button { font-size: .9rem; padding: .35rem .6rem; }
+      #run .hint { display: none; }   /* (Ctrl+Enter) は省略 */
     }
     button:hover:not(:disabled) { background: #3d3d3d; }
     button:disabled { opacity: .45; cursor: default; }
@@ -194,7 +205,7 @@
   <header>
     <h1>AkaDako Python</h1>
     <button id="connect">ボードに接続</button>
-    <button id="run" disabled>実行 ▶ (Ctrl+Enter)</button>
+    <button id="run" disabled>実行 ▶ <span class="hint">(Ctrl+Enter)</span></button>
     <button id="stop" disabled>停止 ◼</button>
     <button id="debug" disabled>デバッグ 🐞</button>
     <button id="save">保存</button>
