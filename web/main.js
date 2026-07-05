@@ -38,7 +38,7 @@ const shareData = new Uint8Array(shareSAB, SHARE_HDR, SHARE_CAP);
 
 const BP_MAX = 4096;                                // ブレークポイント行ビットマップの上限
 const dbgSAB = new SharedArrayBuffer(16 + BP_MAX); // デバッガ制御 + bpビットマップ
-const dbgCtrl = new Int32Array(dbgSAB, 0, 4);      // [0]=command (1=step,2=continue,3=stop)
+const dbgCtrl = new Int32Array(dbgSAB, 0, 4);      // [0]=command (1=step,2=continue,3=stop) [1]=モニター停止要求
 const bpMap = new Uint8Array(dbgSAB, 16, BP_MAX);  // bpMap[行番号]=1 ならブレークポイント（実行中もライブ反映）
 
 // --- DOM --------------------------------------------------------------------
@@ -410,6 +410,11 @@ async function connectMidi() {
   midiOut = output;
   setStatus("接続済み", true);
   log(`接続しました: 入力="${input.name}" 出力="${output.name}"\n`, "muted");
+  connectBtn.textContent = "Rescan";
+  connectBtn.title = "センサーを再スキャン";
+  // 接続した瞬間にセンサーを走査して、見つかったセンサーのグラフ表示を始める。
+  // Pyodide がまだ読み込み中なら ready 受信時に開始する。
+  if (workerReady) startMonitor(true);
 }
 
 // --- share server (共有通信): WebSocket + fetch live here on the main thread --
@@ -463,6 +468,34 @@ const worker = new Worker("/web/worker.js");
 let running = false;
 let workerReady = false;
 let probing = false;
+let lastRunError = "";   // 直前の実行のエラー（バイブコーディング修正モードでAIに渡す）
+
+// --- 常時センサーモニター（Connect後に走査し、実行中以外はグラフを更新し続ける）
+// ワーカー内の pybridge.monitor_loop がセンサーを約1秒ごとに読み、計測値は既存の
+// dbg チャンネルで届く。ループ中はワーカーがブロックするため、Run/Debug/Probe の
+// 前には必ず stopMonitor() で止めてから postMessage する。
+let monitorRunning = false;
+let monitorStopResolvers = [];
+let availableSensors = null;   // 直近の走査結果（Sample はこれを使い回して即生成）
+
+function startMonitor(reprobe) {
+  if (!workerReady || !midiOut || monitorRunning || running || probing) return;
+  if (reprobe) availableSensors = null;
+  if (availableSensors && availableSensors.length === 0) return;   // 監視対象なし
+  monitorRunning = true;
+  Atomics.store(dbgCtrl, 1, 0);   // クリアしてから開始（workerはクリアしない）
+  if (!availableSensors) setStatus("センサーを調べています…（数秒かかります）", false);
+  worker.postMessage({ type: "monitor", available: availableSensors });
+}
+
+// モニター停止を要求し、mon-done を受けて解決する Promise を返す。
+function stopMonitor() {
+  if (!monitorRunning) return Promise.resolve();
+  return new Promise((resolve) => {
+    monitorStopResolvers.push(resolve);
+    Atomics.store(dbgCtrl, 1, 1);
+  });
+}
 
 worker.onmessage = (e) => {
   const m = e.data;
@@ -472,9 +505,27 @@ worker.onmessage = (e) => {
       runBtn.disabled = false;
       debugBtn.disabled = false;
       setStatus("Pyodide 準備完了 —「Connect」でボードに接続してから「Run ▶」", false);
+      if (midiOut) startMonitor(true);   // 先にConnect済みならモニター開始
+      break;
+    case "mon-available": {
+      availableSensors = m.available || [];
+      const names = availableSensors
+        .map((n) => (window.AKADAKO_LABELS && window.AKADAKO_LABELS[n]) || n);
+      log("センサー検出: " + (names.join(", ") || "なし") + "\n", "muted");
+      setStatus("接続済み", true);
+      break;
+    }
+    case "mon-done":
+      monitorRunning = false;
+      monitorStopResolvers.splice(0).forEach((r) => r());
       break;
     case "stdout": log(m.text); break;
-    case "stderr": log(m.text, "err"); break;
+    case "stderr":
+      log(m.text, "err");
+      // 実行中のエラー（トレースバック）を保持し、バイブコーディングの
+      // 修正モードで生成AIに渡せるようにする。
+      if (running) lastRunError = (lastRunError + m.text).slice(-4000);
+      break;
     case "error-line": markErrorLine(m.line); break;
     case "dbg-pause": onDebugPause(m.line, m.vars); break;
     case "dbg": onDbg(m.name, m.value); break;
@@ -494,11 +545,14 @@ worker.onmessage = (e) => {
       probing = false;
       runBtn.disabled = false;
       const avail = m.available || [];
+      availableSensors = avail;   // 以後の Sample / モニター再開で使い回す
       cm.setValue(generateStarter(avail));
       editorPristine = true;   // 生成直後は未編集あつかい
       currentName = "";
+      lastRunError = "";       // 別のコードになったので直前のエラーは無効
       log("センサー検出: " + (avail.join(", ") || "なし") + " → サンプルコードを表示しました\n", "muted");
       setStatus("接続済み", true);
+      startMonitor(false);
       break;
     }
     case "done":
@@ -507,6 +561,7 @@ worker.onmessage = (e) => {
       debugBtn.disabled = false;
       stopBtn.disabled = true;
       endDebug();
+      startMonitor(false);   // プログラム終了後はセンサーモニターを再開
       break;
   }
 };
@@ -580,17 +635,21 @@ function endDebug() {
   clearDebugLine();
 }
 function debugRun() {
-  if (running) return;
-  running = true;
-  debugging = true;
-  runBtn.disabled = true;
-  debugBtn.disabled = true;
-  stopBtn.disabled = false;
-  irq[0] = 0;
-  clearWatches();
-  clearErrorLine();
-  log("\n🐞 デバッグ実行（行番号の左をクリックでブレークポイント設定）\n", "muted");
-  worker.postMessage({ type: "run-debug", code: cm.getValue(), step: true });
+  if (running || probing) return;
+  stopMonitor().then(() => {
+    if (running || probing) return;   // 停止待ちの間に別の実行が始まっていたら中止
+    running = true;
+    debugging = true;
+    runBtn.disabled = true;
+    debugBtn.disabled = true;
+    stopBtn.disabled = false;
+    irq[0] = 0;
+    lastRunError = "";
+    clearWatches();
+    clearErrorLine();
+    log("\n🐞 デバッグ実行（行番号の左をクリックでブレークポイント設定）\n", "muted");
+    worker.postMessage({ type: "run-debug", code: cm.getValue(), step: true });
+  });
 }
 debugBtn.addEventListener("click", debugRun);
 $("dbg-step").addEventListener("click", () => sendDbg(1));
@@ -598,16 +657,20 @@ $("dbg-continue").addEventListener("click", () => sendDbg(2));
 $("dbg-stop").addEventListener("click", () => { irq[0] = 2; sendDbg(3); });
 
 function runCode() {
-  if (running) return;
-  running = true;
-  runBtn.disabled = true;
-  debugBtn.disabled = true;
-  stopBtn.disabled = false;
-  irq[0] = 0;
-  clearWatches();
-  clearErrorLine();
-  log("\n▶ 実行開始\n", "muted");
-  worker.postMessage({ type: "run", code: cm.getValue() });
+  if (running || probing) return;
+  stopMonitor().then(() => {
+    if (running || probing) return;   // 停止待ちの間に別の実行が始まっていたら中止
+    running = true;
+    runBtn.disabled = true;
+    debugBtn.disabled = true;
+    stopBtn.disabled = false;
+    irq[0] = 0;
+    lastRunError = "";
+    clearWatches();
+    clearErrorLine();
+    log("\n▶ 実行開始\n", "muted");
+    worker.postMessage({ type: "run", code: cm.getValue() });
+  });
 }
 
 function stopCode() {
@@ -618,7 +681,15 @@ function stopCode() {
 
 runBtn.addEventListener("click", runCode);
 stopBtn.addEventListener("click", stopCode);
-connectBtn.addEventListener("click", connectMidi);
+connectBtn.addEventListener("click", () => {
+  if (midiOut) {
+    // 接続済みなら再スキャン: モニターを止めて、走査からやり直す
+    if (running || probing) return;
+    stopMonitor().then(() => { clearWatches(); startMonitor(true); });
+  } else {
+    connectMidi();
+  }
+});
 clearBtn.addEventListener("click", () => (consoleEl.textContent = ""));
 
 // --- プログラムの保存 / 読み込み (localStorage) ----------------------------
@@ -734,6 +805,7 @@ function openOpenDialog() {
       cm.setValue(code);
       currentName = name;
       editorPristine = false;   // 読み込んだコードは自動生成で上書きしない
+      lastRunError = "";        // 別のコードになったので直前のエラーは無効
       closeModal();
       setStatus("読み込みました: " + name, true);
     });
@@ -776,7 +848,8 @@ let lastVibePrompt = "";
 
 // 生成AIに渡す指示文。ユーザーの要望を「1つの完結したPythonプログラム」に仕立てさせる。
 // currentCode を渡すと「今のコードを修正」、null なら「ゼロから作成」のプロンプトになる。
-function buildVibePrompt(userRequest, currentCode) {
+// runError には直前の実行で出たエラー（トレースバック）を渡せる（修正モードのみ）。
+function buildVibePrompt(userRequest, currentCode, runError) {
   const api = (window.AKADAKO_BOARD_API || [])
     .map((a) => "  board." + a.sig + " — " + a.doc)
     .join("\n");
@@ -808,6 +881,14 @@ function buildVibePrompt(userRequest, currentCode) {
   ];
   if (currentCode) {
     lines.push("", "# 現在のPythonコード", "```python", currentCode, "```");
+    if (runError) {
+      lines.push(
+        "",
+        "# 直前の実行で出たエラー",
+        "このコードを実行したとき、次のエラーが出た。修正の際はこのエラーの解消も考慮すること。",
+        "```", runError.trim(), "```",
+      );
+    }
   }
   lines.push("", "# ユーザーの要望", userRequest);
   return lines.join("\n");
@@ -866,8 +947,10 @@ function openVibeDialog(prefill) {
     btnNew.classList.toggle("active", mode === "new");
     if (mode === "modify") {
       label.textContent = "今のコードをどう直したいか、日本語で説明してください:";
-      ta.placeholder = "例: 温度が30度をこえたら警告を表示して";
-      hint.textContent = "エディタの現在のコードを送り、要望に沿って修正します。コードが大きいと送信できないことがあります。Ctrl/⌘+Enter でも実行できます。";
+      ta.placeholder = lastRunError ? "例: エラーを直して" : "例: 温度が30度をこえたら警告を表示して";
+      hint.textContent = "エディタの現在のコードを送り、要望に沿って修正します。" +
+        (lastRunError ? "直前の実行で出たエラーも一緒に送ります。" : "") +
+        "コードが大きいと送信できないことがあります。Ctrl/⌘+Enter でも実行できます。";
     } else {
       label.textContent = "作りたいものを日本語で説明してください:";
       ta.placeholder = "例: 温度と湿度を1秒ごとに表示して、暑いときは警告を出す";
@@ -898,6 +981,7 @@ function openVibeDialog(prefill) {
 
 async function runVibeGeneration(promptText, mode) {
   const currentCode = mode === "modify" ? cm.getValue() : null;
+  const runError = mode === "modify" ? lastRunError : "";
   const node = document.createElement("div");
   node.style.cssText = "display:flex;align-items:center;gap:.7rem;";
   const spin = document.createElement("span");
@@ -908,7 +992,7 @@ async function runVibeGeneration(promptText, mode) {
   showModal("バイブコーディング ✨", node, []); // 生成中はボタンなし
 
   try {
-    const data = await callGenerativeAI(buildVibePrompt(promptText, currentCode));
+    const data = await callGenerativeAI(buildVibePrompt(promptText, currentCode, runError));
     if (data && typeof data.content === "string" && data.content.trim() !== "") {
       const code = extractCode(data.content);
       closeModal();
@@ -954,6 +1038,7 @@ function applyVibeResult(code, mode) {
     cm.setValue(code);
     editorPristine = true;   // 生成直後は未編集あつかい
     currentName = "";
+    lastRunError = "";       // 生成後の新しいコードに古いエラーは引き継がない
     setStatus("バイブコーディングでコードを生成しました —「Run ▶」で実行できます", true);
     log("バイブコーディングでコードを生成しました。\n", "muted");
   };
@@ -1054,12 +1139,29 @@ function showTab(which) {
 tabSensor.addEventListener("click", () => showTab("sensor"));
 tabRef.addEventListener("click", () => showTab("ref"));
 
-// --- 「サンプル」: 接続中のボードを調べて、合ったサンプルコードに差し替える ----
+// --- 「サンプル」: ボードに合ったサンプルコードに差し替える -------------------
+// Connect 時のモニター走査で検出済みならその結果を使って即生成。
+// （未走査のときだけワーカーに probe を依頼する）
 function startProbe() {
-  probing = true;
-  runBtn.disabled = true;
-  setStatus("センサーを調べています…（数秒かかります）", false);
-  worker.postMessage({ type: "probe" });   // 結果は probe-result で受ける
+  stopMonitor().then(() => {
+    if (running || probing) return;
+    probing = true;
+    runBtn.disabled = true;
+    setStatus("センサーを調べています…（数秒かかります）", false);
+    worker.postMessage({ type: "probe" });   // 結果は probe-result で受ける
+  });
+}
+
+function applySample() {
+  if (availableSensors) {
+    cm.setValue(generateStarter(availableSensors));
+    editorPristine = true;   // 生成直後は未編集あつかい
+    currentName = "";
+    lastRunError = "";       // 別のコードになったので直前のエラーは無効
+    log("検出済みセンサー: " + (availableSensors.join(", ") || "なし") + " → サンプルコードを表示しました\n", "muted");
+    return;
+  }
+  startProbe();
 }
 
 function onSampleClick() {
@@ -1074,12 +1176,12 @@ function onSampleClick() {
     const msg = document.createElement("div");
     msg.textContent = "今のコードをサンプルに置き換えます。よろしいですか？（保存していない変更は消えます）";
     showModal("確認", msg, [
-      { label: "置き換える", primary: true, onClick: () => { closeModal(); startProbe(); } },
+      { label: "置き換える", primary: true, onClick: () => { closeModal(); applySample(); } },
       { label: "やめる", onClick: closeModal },
     ]);
     return;
   }
-  startProbe();
+  applySample();
 }
 $("sample").addEventListener("click", onSampleClick);
 

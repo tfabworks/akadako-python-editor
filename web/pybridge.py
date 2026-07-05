@@ -322,18 +322,13 @@ class WebShareServer:
             pass
 
 
-def probe_sensors():
-    """Connect, try each sensor once, and return JSON of the ones that respond.
+def _probe_available(board, should_stop=None):
+    """Try each sensor once on a connected board; return the responding ones.
 
-    Used to tailor the starter program to the board actually plugged in.
     Missing I2C sensors time out (~2s each), so we group the BME280 readings
     (temperature implies humidity/pressure) to keep detection short.
+    Returns None if should_stop() turns true mid-probe (abandoned, no result).
     """
-    import json
-    from akadako import AkaDako
-
-    board = AkaDako.connect()
-
     def ok(call):
         try:
             call()
@@ -343,20 +338,86 @@ def probe_sensors():
 
     available = []
     # BME280 (環境センサー): 温度が読めれば湿度・気圧も同じセンサー
+    if should_stop and should_stop():
+        return None
     if ok(board.fetch_temperature):
         available += ["fetch_temperature", "fetch_humidity", "fetch_pressure"]
     for name in (
         "fetch_brightness", "analog_brightness", "fetch_optical_distance",
         "fetch_acceleration_x", "motion_sensor", "analog_a1", "digital_a1",
     ):
+        if should_stop and should_stop():
+            return None
         if ok(getattr(board, name)):
             available.append(name)
+    return available
 
+
+def probe_sensors():
+    """Connect, try each sensor once, and return JSON of the ones that respond.
+
+    Used to tailor the starter program to the board actually plugged in.
+    """
+    import json
+    from akadako import AkaDako
+
+    board = AkaDako.connect()
     try:
-        board.disconnect()
-    except Exception:
-        pass
-    return json.dumps(available)
+        return json.dumps(_probe_available(board))
+    finally:
+        try:
+            board.disconnect()
+        except Exception:
+            pass
+
+
+def monitor_loop(available_json=None):
+    """Idle-time sensor monitor: probe once (unless the UI passes the cached
+    list), then read each available sensor about once a second. The reads are
+    instrumented by _install_debug, so every successful read shows up in the
+    live monitor panel automatically.
+
+    Runs between user programs; the UI requests a stop through a shared flag
+    (monShouldStop, dbgCtrl[1]) before running user code. Also bails out after
+    3 all-failure rounds (e.g. board unplugged) so it never spins forever.
+    """
+    import json
+    from akadako import AkaDako
+    from js import monShouldStop, monAvailable
+
+    board = AkaDako.connect()
+    try:
+        if available_json:
+            available = json.loads(available_json)
+        else:
+            # 走査中も停止要求で中断できるようにする（Run を待たせない）。
+            # 中断時は結果を報告しない → 次回のモニター開始時に走査し直す。
+            available = _probe_available(board, monShouldStop)
+            if available is None:
+                return
+            monAvailable(json.dumps(available))
+        readers = [getattr(board, n) for n in available if hasattr(board, n)]
+        empty_rounds = 0
+        while not monShouldStop() and empty_rounds < 3:
+            got = 0
+            for read in readers:
+                if monShouldStop():
+                    return
+                try:
+                    read()          # 成功した読み取りはラッパー経由でモニターに届く
+                    got += 1
+                except Exception:
+                    pass
+            empty_rounds = 0 if got else empty_rounds + 1
+            for _ in range(5):      # 約1秒間隔。停止要求は0.2秒ごとに確認
+                if monShouldStop():
+                    return
+                time.sleep(0.2)     # pumping sleep: 待機中もMIDIを排出し続ける
+    finally:
+        try:
+            board.disconnect()
+        except Exception:
+            pass
 
 
 def _dbg_collect_vars(frame):

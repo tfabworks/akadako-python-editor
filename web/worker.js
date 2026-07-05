@@ -86,6 +86,11 @@ self.shareReadValues = () => {
   return n ? new TextDecoder().decode(shareData.subarray(0, n)) : "";
 };
 
+// Idle-time sensor monitor: the UI asks the loop to stop (before running user
+// code) by setting dbgCtrl[1]=1; the probe result goes up via mon-available.
+self.monShouldStop = () => (dbgCtrl ? Atomics.load(dbgCtrl, 1) === 1 : true);
+self.monAvailable = (json) => post("mon-available", { available: JSON.parse(json) });
+
 // Step debugger: send the paused line + locals to the UI, then block until the
 // UI writes a command (1=step, 2=continue, 3=stop) into dbgCtrl.
 self.dbgPause = (line, varsJson) => post("dbg-pause", { line, vars: varsJson });
@@ -184,6 +189,16 @@ self.onmessage = async (e) => {
       } catch (err) {
         post("probe-result", { available: [], error: String(err.message || err) });
       }
+    } else if (msg.type === "monitor") {
+      // NOTE: 停止フラグ(dbgCtrl[1])はここではクリアしない。クリアは main 側が
+      // postMessage の直前に行う（直後に来た停止要求を消してしまわないため）。
+      try {
+        pyodide.globals.set("__mon_available", msg.available ? JSON.stringify(msg.available) : "");
+        await pyodide.runPythonAsync("import pybridge; pybridge.monitor_loop(__mon_available or None)");
+      } catch (err) {
+        // ボード切断などでループが落ちても致命的ではない（UIはmon-doneで整合する）
+      }
+      post("mon-done", {});
     }
   } catch (err) {
     post("stderr", { text: "worker: " + String(err.message || err) + "\n" });
