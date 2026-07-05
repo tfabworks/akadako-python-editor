@@ -214,6 +214,16 @@
       background: #fff; color: var(--text); border: 1px solid var(--border); border-radius: 6px;
     }
     .modal-body textarea { resize: vertical; min-height: 5.5em; line-height: 1.5; }
+    /* バイブコーディングの「修正 / ゼロから」切り替え */
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: .7rem; }
+    .seg button {
+      border: none; border-radius: 0; padding: .5rem 1rem; background: #fff; color: var(--muted);
+      font-size: .95rem; cursor: pointer; border-right: 1px solid var(--border);
+    }
+    .seg button:last-child { border-right: none; }
+    .seg button:hover:not(.active) { background: #eef3f9; }
+    .seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .seg button:disabled { opacity: .4; cursor: not-allowed; }
     /* バイブコーディングの生成中スピナー */
     .vibe-spinner {
       display: inline-block; width: 1.15em; height: 1.15em; flex: none;

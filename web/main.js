@@ -775,13 +775,23 @@ const GENERATIVE_AI_URL = "https://xcratch.699.jp/agai/ai";
 let lastVibePrompt = "";
 
 // 生成AIに渡す指示文。ユーザーの要望を「1つの完結したPythonプログラム」に仕立てさせる。
-function buildVibePrompt(userRequest) {
+// currentCode を渡すと「今のコードを修正」、null なら「ゼロから作成」のプロンプトになる。
+function buildVibePrompt(userRequest, currentCode) {
   const api = (window.AKADAKO_BOARD_API || [])
     .map((a) => "  board." + a.sig + " — " + a.doc)
     .join("\n");
-  return [
-    "あなたは AkaDako Python Editor のためのコード生成アシスタントです。",
-    "ユーザーの要望に合う「1つの完結したPythonプログラム」を作成してください。",
+  const head = currentCode
+    ? [
+        "あなたは AkaDako Python Editor のためのコード生成アシスタントです。",
+        "下記の「現在のPythonコード」を、ユーザーの要望に沿って修正した「1つの完結したPythonプログラム」を返してください。",
+        "既存の処理や構造はできるだけ活かし、要望に関係する部分だけを変更してください。",
+      ]
+    : [
+        "あなたは AkaDako Python Editor のためのコード生成アシスタントです。",
+        "ユーザーの要望に合う「1つの完結したPythonプログラム」を新しく作成してください。",
+      ];
+  const lines = [
+    ...head,
     "",
     "# 制約",
     "- ブラウザ内の Pyodide で実行される。使えるのは Python 標準ライブラリと akadako モジュールのみ。",
@@ -795,10 +805,12 @@ function buildVibePrompt(userRequest) {
     "# 使える主なAPI（AkaDako.connect() が返す board のメソッド）",
     api,
     "AkaDako.Color.RED などの色定数、AkaDako.ColorLed.OnBoard などの接続先定数も使える。",
-    "",
-    "# ユーザーの要望",
-    userRequest,
-  ].join("\n");
+  ];
+  if (currentCode) {
+    lines.push("", "# 現在のPythonコード", "```python", currentCode, "```");
+  }
+  lines.push("", "# ユーザーの要望", userRequest);
+  return lines.join("\n");
 }
 
 // 応答テキストからコード本体を取り出す（マークダウンのコードフェンスがあれば剥がす）。
@@ -825,25 +837,54 @@ async function callGenerativeAI(promptText) {
   return res.json(); // { content: string|null, error?: string|object }
 }
 
-function openVibeDialog() {
+// prefill を渡すと入力欄に復元する（エラー後の「入力に戻る」でのみ使用）。
+// 通常のボタンからの起動は空欄で開き、前回のプロンプトは表示しない。
+function openVibeDialog(prefill) {
   const wrap = document.createElement("div");
+
+  // モード切り替え（今のコードを修正 / ゼロから作る）。
+  // 初期値は編集状態から自動選択: 未編集(スターター/生成直後)ならゼロから、手を加えていれば修正。
+  let mode = editorPristine ? "new" : "modify";
+  const seg = document.createElement("div");
+  seg.className = "seg";
+  const btnModify = document.createElement("button");
+  btnModify.textContent = "今のコードを修正";
+  const btnNew = document.createElement("button");
+  btnNew.textContent = "ゼロから作る";
+  seg.append(btnModify, btnNew);
+
   const label = document.createElement("div");
-  label.textContent = "作りたいものを日本語で説明してください:";
   label.style.marginBottom = ".4rem";
   const ta = document.createElement("textarea");
   ta.rows = 5;
-  ta.value = lastVibePrompt;
-  ta.placeholder = "例: 温度と湿度を1秒ごとに表示して、暑いときは警告を出す";
+  ta.value = typeof prefill === "string" ? prefill : "";   // 通常は空欄で開く
   const hint = document.createElement("div");
   hint.style.cssText = "font-size:.85rem;color:var(--muted);margin-top:.5rem;line-height:1.6;";
-  hint.textContent = "AkaDako の生成AI がPythonプログラムを作成します（ご利用には 699.jp のアクセスコードが必要です）。Ctrl/⌘+Enter でも生成できます。";
-  wrap.append(label, ta, hint);
+
+  function renderMode() {
+    btnModify.classList.toggle("active", mode === "modify");
+    btnNew.classList.toggle("active", mode === "new");
+    if (mode === "modify") {
+      label.textContent = "今のコードをどう直したいか、日本語で説明してください:";
+      ta.placeholder = "例: 温度が30度をこえたら警告を表示して";
+      hint.textContent = "エディタの現在のコードを送り、要望に沿って修正します。コードが大きいと送信できないことがあります。Ctrl/⌘+Enter でも実行できます。";
+    } else {
+      label.textContent = "作りたいものを日本語で説明してください:";
+      ta.placeholder = "例: 温度と湿度を1秒ごとに表示して、暑いときは警告を出す";
+      hint.textContent = "ゼロから新しいPythonプログラムを作ります（今の内容は置き換わります）。Ctrl/⌘+Enter でも実行できます。";
+    }
+  }
+  btnModify.addEventListener("click", () => { mode = "modify"; renderMode(); ta.focus(); });
+  btnNew.addEventListener("click", () => { mode = "new"; renderMode(); ta.focus(); });
+  renderMode();
+
+  wrap.append(seg, label, ta, hint);
 
   const doGen = () => {
     const p = ta.value.trim();
     if (!p) { ta.focus(); return; }
     lastVibePrompt = p;
-    runVibeGeneration(p);
+    runVibeGeneration(p, mode);
   };
   ta.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doGen(); }
@@ -855,7 +896,8 @@ function openVibeDialog() {
   setTimeout(() => ta.focus(), 0);
 }
 
-async function runVibeGeneration(promptText) {
+async function runVibeGeneration(promptText, mode) {
+  const currentCode = mode === "modify" ? cm.getValue() : null;
   const node = document.createElement("div");
   node.style.cssText = "display:flex;align-items:center;gap:.7rem;";
   const spin = document.createElement("span");
@@ -866,11 +908,11 @@ async function runVibeGeneration(promptText) {
   showModal("バイブコーディング ✨", node, []); // 生成中はボタンなし
 
   try {
-    const data = await callGenerativeAI(buildVibePrompt(promptText));
+    const data = await callGenerativeAI(buildVibePrompt(promptText, currentCode));
     if (data && typeof data.content === "string" && data.content.trim() !== "") {
       const code = extractCode(data.content);
       closeModal();
-      applyVibeResult(code);
+      applyVibeResult(code, mode);
       return;
     }
     // エラー処理（xcx-g2s の生成AIブロックと同じ分岐）
@@ -898,13 +940,16 @@ function showVibeError(html, text) {
   if (html) node.innerHTML = html;          // 699.jp のエラー（アクセスコード案内リンク等）
   else node.textContent = text || "生成に失敗しました。";
   showModal("バイブコーディング ✨", node, [
-    { label: "入力に戻る", primary: true, onClick: openVibeDialog },
+    // エラー時だけは、打ち直さずに済むよう直前の入力を復元する
+    { label: "入力に戻る", primary: true, onClick: () => openVibeDialog(lastVibePrompt) },
     { label: "閉じる", onClick: closeModal },
   ]);
 }
 
-// 生成結果をエディタへ。未保存の編集があるときは置き換え確認する（サンプルと同じ作法）。
-function applyVibeResult(code) {
+// 生成結果をエディタへ。
+// - modify: 現在コードを直した版なので確認なしで反映（ユーザーが修正を明示）。
+// - new: 未保存の編集があるときだけ置き換え確認する（サンプルと同じ作法）。
+function applyVibeResult(code, mode) {
   const put = () => {
     cm.setValue(code);
     editorPristine = true;   // 生成直後は未編集あつかい
@@ -912,7 +957,7 @@ function applyVibeResult(code) {
     setStatus("バイブコーディングでコードを生成しました —「Run ▶」で実行できます", true);
     log("バイブコーディングでコードを生成しました。\n", "muted");
   };
-  if (!editorPristine) {
+  if (mode === "new" && !editorPristine) {
     const msg = document.createElement("div");
     msg.textContent = "生成したコードで今の内容を置き換えます。よろしいですか？（保存していない変更は消えます）";
     showModal("確認", msg, [
@@ -924,7 +969,7 @@ function applyVibeResult(code) {
   put();
 }
 
-$("vibe").addEventListener("click", openVibeDialog);
+$("vibe").addEventListener("click", () => openVibeDialog());   // 空欄で開く（前回のプロンプトは表示しない）
 
 // --- 右パネルのタブ（センサー / リファレンス）。リファレンスは静的データ ------
 const refview = $("refview");
