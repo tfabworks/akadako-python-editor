@@ -7,8 +7,8 @@ const HDR = 16;
 const PORT_FILTERS = ["STEAM BOX", "MidiDako", "AkaDako"];
 
 const STARTER_CODE = `# AkaDako のプログラム
-# 「ボードに接続」→「実行 ▶」（止めるときは「停止 ◼」）
-# 「サンプル」ボタンで、つないだボードに合わせた例を表示できます
+# 「Connect」→「Run ▶」（止めるときは「Stop ◼」）
+# 「Sample」ボタンで、つないだボードに合わせた例を表示できます
 
 from akadako import AkaDako
 import time
@@ -78,7 +78,6 @@ window.addEventListener("unhandledrejection", (e) => {
 const cm = CodeMirror.fromTextArea($("editor"), {
   value: STARTER_CODE,
   mode: "python",
-  theme: "material-darker",
   lineNumbers: true,
   gutters: ["CodeMirror-linenumbers", "breakpoints"],
   indentUnit: 4,
@@ -186,7 +185,7 @@ function generateStarter(available) {
   }
   const body = lines.length ? lines.join("\n") : '    print("バージョン:", board.version)';
   return `# このボードに搭載されているセンサーに合わせて自動生成しました
-# 「実行 ▶」で動かし、「停止 ◼」で止めます
+# 「Run ▶」で動かし、「Stop ◼」で止めます
 from akadako import AkaDako
 import time
 
@@ -244,7 +243,7 @@ function pyHint(cmi) {
           displayText: c.sig,
           render(el) {
             el.innerHTML =
-              '<span style="color:#9cdcfe">' + c.sig + "</span>" +
+              '<span style="color:#6f42c1">' + c.sig + "</span>" +
               '<span style="color:#888; margin-left:.6em">' + c.doc + "</span>";
           },
         }));
@@ -269,8 +268,8 @@ function pyHint(cmi) {
       ? { text, render(el) { el.innerHTML = '<span style="color:' + color + '">' + text + "</span>"; } }
       : { text });
   };
-  PY_KEYWORDS.forEach((k) => add(k, "#c586c0"));
-  PY_BUILTINS.forEach((b) => add(b, "#dcdcaa"));
+  PY_KEYWORDS.forEach((k) => add(k, "#a626a4"));
+  PY_BUILTINS.forEach((b) => add(b, "#b26a00"));
   collectWords(cmi).forEach((w) => add(w));
   if (!list.length) return null;
   return {
@@ -343,7 +342,7 @@ function drawSpark(w) {
   if (values.length < 2) return;
   let min = Math.min(...values), max = Math.max(...values);
   if (max === min) { max += 1; min -= 1; }
-  ctx.strokeStyle = "#4ec9b0";
+  ctx.strokeStyle = "#1565c0";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   values.forEach((v, i) => {
@@ -472,7 +471,7 @@ worker.onmessage = (e) => {
       workerReady = true;
       runBtn.disabled = false;
       debugBtn.disabled = false;
-      setStatus("Pyodide 準備完了 —「ボードに接続」してから「実行」", false);
+      setStatus("Pyodide 準備完了 —「Connect」でボードに接続してから「Run ▶」", false);
       break;
     case "stdout": log(m.text); break;
     case "stderr": log(m.text, "err"); break;
@@ -673,7 +672,7 @@ function showModal(title, contentNode, actions) {
   for (const a of actions) {
     const b = document.createElement("button");
     b.textContent = a.label;
-    if (a.primary) { b.style.background = "#0e639c"; b.style.borderColor = "#0e639c"; }
+    if (a.primary) b.classList.add("primary");
     b.addEventListener("click", a.onClick);
     modalActions.append(b);
   }
@@ -766,6 +765,166 @@ $("open").addEventListener("click", openOpenDialog);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !modal.hidden) closeModal();
 });
+
+// --- バイブコーディング（生成AIでPythonプログラムを作る） ---------------------
+// xcx-g2s の「生成AI」ブロックと同じエンドポイントを使う。
+// 認証は 699.jp のアクセスコード Cookie（credentials: include で送信）。
+// py.699.jp と xcratch.699.jp は同一サイトなのでサードパーティ Cookie の制約を受けない。
+const GENERATIVE_AI_URL = "https://xcratch.699.jp/agai/ai";
+
+let lastVibePrompt = "";
+
+// 生成AIに渡す指示文。ユーザーの要望を「1つの完結したPythonプログラム」に仕立てさせる。
+function buildVibePrompt(userRequest) {
+  const api = (window.AKADAKO_BOARD_API || [])
+    .map((a) => "  board." + a.sig + " — " + a.doc)
+    .join("\n");
+  return [
+    "あなたは AkaDako Python Editor のためのコード生成アシスタントです。",
+    "ユーザーの要望に合う「1つの完結したPythonプログラム」を作成してください。",
+    "",
+    "# 制約",
+    "- ブラウザ内の Pyodide で実行される。使えるのは Python 標準ライブラリと akadako モジュールのみ。",
+    "- AkaDako（センサーやLED等）を使う場合は `from akadako import AkaDako` を書き、",
+    "  `board = AkaDako.connect()` で接続してから board のメソッドを使う。",
+    "- くりかえし読むときは while True と time.sleep() を使う（sleep なしの busy loop にしない）。",
+    "- monitor(\"名前\", 値) を呼ぶと、右のモニターパネルに値をリアルタイム表示できる。",
+    "- コメントは日本語で、初学者にも分かりやすい簡潔なコードにする。",
+    "- 出力は完成したPythonコードのみ。説明文やマークダウンのコードフェンス(```)は付けない。",
+    "",
+    "# 使える主なAPI（AkaDako.connect() が返す board のメソッド）",
+    api,
+    "AkaDako.Color.RED などの色定数、AkaDako.ColorLed.OnBoard などの接続先定数も使える。",
+    "",
+    "# ユーザーの要望",
+    userRequest,
+  ].join("\n");
+}
+
+// 応答テキストからコード本体を取り出す（マークダウンのコードフェンスがあれば剥がす）。
+function extractCode(text) {
+  if (!text) return "";
+  const fence = text.match(/```(?:python|py)?\s*([\s\S]*?)```/i);
+  return (fence ? fence[1] : text).trim();
+}
+
+async function callGenerativeAI(promptText) {
+  // エンドポイントは board.version を要求する。Python 版はボードがワーカー側に
+  // あって手軽に取れないため、既定値を送る。
+  const res = await fetch(GENERATIVE_AI_URL, {
+    mode: "cors",
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: [{ text: promptText }],
+      board: { version: "2.0.0" },
+      locale: "ja",
+    }),
+  });
+  return res.json(); // { content: string|null, error?: string|object }
+}
+
+function openVibeDialog() {
+  const wrap = document.createElement("div");
+  const label = document.createElement("div");
+  label.textContent = "作りたいものを日本語で説明してください:";
+  label.style.marginBottom = ".4rem";
+  const ta = document.createElement("textarea");
+  ta.rows = 5;
+  ta.value = lastVibePrompt;
+  ta.placeholder = "例: 温度と湿度を1秒ごとに表示して、暑いときは警告を出す";
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size:.85rem;color:var(--muted);margin-top:.5rem;line-height:1.6;";
+  hint.textContent = "AkaDako の生成AI がPythonプログラムを作成します（ご利用には 699.jp のアクセスコードが必要です）。Ctrl/⌘+Enter でも生成できます。";
+  wrap.append(label, ta, hint);
+
+  const doGen = () => {
+    const p = ta.value.trim();
+    if (!p) { ta.focus(); return; }
+    lastVibePrompt = p;
+    runVibeGeneration(p);
+  };
+  ta.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doGen(); }
+  });
+  showModal("バイブコーディング ✨", wrap, [
+    { label: "生成 ✨", primary: true, onClick: doGen },
+    { label: "キャンセル", onClick: closeModal },
+  ]);
+  setTimeout(() => ta.focus(), 0);
+}
+
+async function runVibeGeneration(promptText) {
+  const node = document.createElement("div");
+  node.style.cssText = "display:flex;align-items:center;gap:.7rem;";
+  const spin = document.createElement("span");
+  spin.className = "vibe-spinner";
+  const txt = document.createElement("span");
+  txt.textContent = "生成中です…（10〜30秒ほどかかります）";
+  node.append(spin, txt);
+  showModal("バイブコーディング ✨", node, []); // 生成中はボタンなし
+
+  try {
+    const data = await callGenerativeAI(buildVibePrompt(promptText));
+    if (data && typeof data.content === "string" && data.content.trim() !== "") {
+      const code = extractCode(data.content);
+      closeModal();
+      applyVibeResult(code);
+      return;
+    }
+    // エラー処理（xcx-g2s の生成AIブロックと同じ分岐）
+    let errHtml = null, errText = null;
+    if (data && data.error) {
+      if (typeof data.error === "string") {
+        errText = data.error;
+      } else if (typeof data.error === "object") {
+        if (data.error.type === "text/html") errHtml = data.error.content;
+        else if (typeof data.error.content === "string") errText = data.error.content;
+      }
+    }
+    if (!errHtml && !errText) {
+      errText = "空の応答が返りました。要望を具体的にして、もう一度お試しください。";
+    }
+    showVibeError(errHtml, errText);
+  } catch (e) {
+    showVibeError(null, "生成AIに接続できませんでした: " + ((e && e.message) || e));
+  }
+}
+
+function showVibeError(html, text) {
+  const node = document.createElement("div");
+  node.className = "vibe-errbox";
+  if (html) node.innerHTML = html;          // 699.jp のエラー（アクセスコード案内リンク等）
+  else node.textContent = text || "生成に失敗しました。";
+  showModal("バイブコーディング ✨", node, [
+    { label: "入力に戻る", primary: true, onClick: openVibeDialog },
+    { label: "閉じる", onClick: closeModal },
+  ]);
+}
+
+// 生成結果をエディタへ。未保存の編集があるときは置き換え確認する（サンプルと同じ作法）。
+function applyVibeResult(code) {
+  const put = () => {
+    cm.setValue(code);
+    editorPristine = true;   // 生成直後は未編集あつかい
+    currentName = "";
+    setStatus("バイブコーディングでコードを生成しました —「Run ▶」で実行できます", true);
+    log("バイブコーディングでコードを生成しました。\n", "muted");
+  };
+  if (!editorPristine) {
+    const msg = document.createElement("div");
+    msg.textContent = "生成したコードで今の内容を置き換えます。よろしいですか？（保存していない変更は消えます）";
+    showModal("確認", msg, [
+      { label: "置き換える", primary: true, onClick: () => { closeModal(); put(); } },
+      { label: "やめる", onClick: closeModal },
+    ]);
+    return;
+  }
+  put();
+}
+
+$("vibe").addEventListener("click", openVibeDialog);
 
 // --- 右パネルのタブ（センサー / リファレンス）。リファレンスは静的データ ------
 const refview = $("refview");
@@ -860,8 +1019,8 @@ function startProbe() {
 
 function onSampleClick() {
   if (!midiOut) {
-    setStatus("先に「ボードに接続」してください", false);
-    log("「サンプル」はボードに接続してから使えます。\n", "err");
+    setStatus("先に「Connect」でボードに接続してください", false);
+    log("「Sample」はボードに接続してから使えます。\n", "err");
     return;
   }
   if (!workerReady) { setStatus("Pyodide の準備中です…少し待ってください", false); return; }
