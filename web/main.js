@@ -49,6 +49,7 @@ const runBtn = $("run");
 const stopBtn = $("stop");
 const connectBtn = $("connect");
 const clearBtn = $("clear");
+const revertBtn = $("revert");
 const watchlist = $("watchlist");
 
 function log(text, cls) {
@@ -654,6 +655,7 @@ function debugRun() {
     lastRunOutput = "";
     clearWatches();
     clearErrorLine();
+    snapshotRun(cm.getValue());
     log("\n🐞 デバッグ実行（行番号の左をクリックでブレークポイント設定）\n", "muted");
     worker.postMessage({ type: "run-debug", code: cm.getValue(), step: true });
   });
@@ -676,6 +678,7 @@ function runCode() {
     lastRunOutput = "";
     clearWatches();
     clearErrorLine();
+    snapshotRun(cm.getValue());
     log("\n▶ 実行開始\n", "muted");
     worker.postMessage({ type: "run", code: cm.getValue() });
   });
@@ -742,6 +745,79 @@ function loadDraft() {
   catch { return null; }
 }
 function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch {} }
+
+// --- 実行時スナップショット（「⏪ 戻す」= 前に実行したコードへの復元） --------
+// Run/Debug のたびに実行したコードを控えておき、動いていたコードを壊して
+// しまってもワンクリックで戻せるようにする。判断いらずの安全ネット。
+const SNAP_KEY = "akadako_run_snapshots";
+const SNAP_MAX = 10;
+
+function loadSnaps() {
+  try { return JSON.parse(localStorage.getItem(SNAP_KEY) || "[]"); }
+  catch { return []; }
+}
+function saveSnaps(arr) {
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify(arr.slice(0, SNAP_MAX))); } catch {}
+}
+
+function snapshotRun(code) {
+  if (!code.trim()) return;
+  const snaps = loadSnaps();
+  if (snaps[0] && snaps[0].code === code) return;   // 同じコードの連続実行では増やさない
+  snaps.unshift({ t: Date.now(), code });
+  saveSnaps(snaps);
+  revertBtn.disabled = false;
+}
+
+function snapLabel(s) {
+  const d = new Date(s.t);
+  const hm = d.toTimeString().slice(0, 5);
+  const time = d.toDateString() === new Date().toDateString()
+    ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
+  const first = (s.code.split("\n").find((l) => l.trim() && !l.trim().startsWith("#")) || "").trim();
+  return { time, preview: first.slice(0, 40) };
+}
+
+function restoreSnap(code) {
+  // 戻す操作自体も戻せるように、置き換える前の内容を一覧の先頭に残す
+  snapshotRun(cm.getValue());
+  cm.setValue(code);
+  editorPristine = false;
+  lastRunError = "";
+  lastRunOutput = "";
+  closeModal();
+  setStatus("前に実行したコードに戻しました", true);
+  log("⏪ 前に実行したコードに戻しました\n", "muted");
+}
+
+function openRevertDialog() {
+  const snaps = loadSnaps();
+  const wrap = document.createElement("div");
+  const info = document.createElement("div");
+  info.textContent = "実行したときのコードです（新しい順）。選ぶと今の内容と置き換わります（今の内容も一覧に残ります）。";
+  info.style.cssText = "font-size:.85rem;color:var(--muted);margin-bottom:.5rem;line-height:1.6;";
+  wrap.append(info);
+  for (const s of snaps) {
+    const { time, preview } = snapLabel(s);
+    const row = document.createElement("div");
+    row.className = "prog-row";
+    const tm = document.createElement("span");
+    tm.textContent = time;
+    tm.style.cssText = "color:var(--muted);font-size:.9rem;flex:none;";
+    const nm = document.createElement("span");
+    nm.className = "pname";
+    nm.textContent = preview || "(コメントのみ)";
+    const btn = document.createElement("button");
+    btn.textContent = "これに戻す";
+    btn.addEventListener("click", () => restoreSnap(s.code));
+    row.append(tm, nm, btn);
+    wrap.append(row);
+  }
+  showModal("⏪ 前に実行したコードに戻す", wrap, [{ label: "閉じる", onClick: closeModal }]);
+}
+
+revertBtn.disabled = loadSnaps().length === 0;
+revertBtn.addEventListener("click", openRevertDialog);
 
 function showModal(title, contentNode, actions) {
   modalTitle.textContent = title;
