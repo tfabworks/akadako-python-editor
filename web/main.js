@@ -794,7 +794,7 @@ function openRevertDialog() {
   const snaps = loadSnaps();
   const wrap = document.createElement("div");
   const info = document.createElement("div");
-  info.textContent = "実行したときのコードです（新しい順）。選ぶと今の内容と置き換わります（今の内容も一覧に残ります）。";
+  info.textContent = "実行したときのコードや、AIで置き換える前のコードです（新しい順）。選ぶと今の内容と置き換わります（今の内容も一覧に残ります）。";
   info.style.cssText = "font-size:.85rem;color:var(--muted);margin-bottom:.5rem;line-height:1.6;";
   wrap.append(info);
   for (const s of snaps) {
@@ -813,7 +813,7 @@ function openRevertDialog() {
     row.append(tm, nm, btn);
     wrap.append(row);
   }
-  showModal("⏪ 前に実行したコードに戻す", wrap, [{ label: "閉じる", onClick: closeModal }]);
+  showModal("⏪ 前のコードに戻す", wrap, [{ label: "閉じる", onClick: closeModal }]);
 }
 
 revertBtn.disabled = loadSnaps().length === 0;
@@ -1264,6 +1264,7 @@ function showVibeError(html, text, mode) {
 // - new: 未保存の編集があるときだけ置き換え確認する（サンプルと同じ作法）。
 function applyVibeResult(code, mode) {
   const put = () => {
+    snapshotRun(cm.getValue());   // 置き換え前のコードも「⏪ 戻す」で戻せるように控える
     cm.setValue(code);
     editorPristine = true;   // 生成直後は未編集あつかい
     currentName = "";
