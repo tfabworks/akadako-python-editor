@@ -83,7 +83,12 @@ self.shareSeq = () => (shareCtrl ? Atomics.load(shareCtrl, 1) : 0);
 self.shareReadValues = () => {
   if (!shareCtrl) return "";
   const n = Atomics.load(shareCtrl, 2);
-  return n ? new TextDecoder().decode(shareData.subarray(0, n)) : "";
+  if (!n) return "";
+  // TextDecoder は SharedArrayBuffer 上のビューを受け付けないため、
+  // 通常のバッファへコピーしてから復号する
+  const copy = new Uint8Array(n);
+  copy.set(shareData.subarray(0, n));
+  return new TextDecoder().decode(copy);
 };
 
 // Idle-time sensor monitor: the UI asks the loop to stop (before running user
