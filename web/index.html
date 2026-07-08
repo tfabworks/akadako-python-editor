@@ -214,11 +214,11 @@
       background: #fff; color: var(--text); border: 1px solid var(--border); border-radius: 6px;
     }
     .modal-body textarea { resize: vertical; min-height: 5.5em; line-height: 1.5; }
-    /* バイブコーディングの「修正 / ゼロから」切り替え */
-    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: .7rem; }
+    /* Vibe Coding & Assist のモード切り替え（修正 / ゼロから / エラー相談 / コード相談） */
+    .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: .7rem; }
     .seg button {
-      border: none; border-radius: 0; padding: .5rem 1rem; background: #fff; color: var(--muted);
-      font-size: .95rem; cursor: pointer; border-right: 1px solid var(--border);
+      border: none; border-radius: 0; padding: .5rem .8rem; background: #fff; color: var(--muted);
+      font-size: .9rem; cursor: pointer; border-right: 1px solid var(--border);
     }
     .seg button:last-child { border-right: none; }
     .seg button:hover:not(.active) { background: #eef3f9; }
@@ -233,6 +233,21 @@
     @keyframes vibe-spin { to { transform: rotate(360deg); } }
     .vibe-errbox { max-height: 40vh; overflow: auto; line-height: 1.6; }
     .vibe-errbox a { color: var(--accent); }
+    /* 相談モードの回答表示 */
+    .consult-q { color: var(--muted); font-size: .9rem; margin-bottom: .5rem; white-space: pre-wrap; }
+    .consult-a {
+      background: #f3f8f3; border: 1px solid var(--border); border-radius: 10px;
+      padding: .7rem .9rem; white-space: pre-wrap; line-height: 1.7;
+      max-width: 44rem; max-height: 45vh; overflow: auto;
+    }
+    /* エラー後に出力ペインへ出す「AIに聞く」導線 */
+    #console .ask-ai {
+      display: inline-block; margin: .3rem 0 .4rem; padding: .3rem .8rem;
+      font: inherit; font-size: .9rem; cursor: pointer;
+      color: var(--accent); background: #fff;
+      border: 1px solid var(--accent); border-radius: 999px;
+    }
+    #console .ask-ai:hover { background: #eef3f9; }
     .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid var(--border); }
     .prog-row { display: flex; align-items: center; gap: .5rem; padding: .45rem 0; border-bottom: 1px solid #d5e2ef; }
     .prog-row .pname { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 1rem; word-break: break-all; }
@@ -265,7 +280,7 @@
     <button id="open" title="開く">Open</button>
     <button id="sample" title="接続中のボードに合わせたサンプルコードを作成">Sample</button>
     <span id="status" class="warn">Pyodide を読み込み中…</span>
-    <button id="vibe" title="バイブコーディング：生成AIでプログラムを作成">Vibe Coding ✨</button>
+    <button id="vibe" title="Vibe Coding &amp; Assist：生成AIでプログラムを作成・エラーやコードの相談">Vibe/Assist ✨</button>
   </header>
   <main>
     <div id="editorwrap"><textarea id="editor" spellcheck="false"></textarea></div>
