@@ -19,6 +19,9 @@ const PRECACHE = [
   "/web/vendor/codemirror/addon/edit/matchbrackets.min.js",
   "/web/vendor/codemirror/addon/edit/closebrackets.min.js",
   "/web/vendor/codemirror/theme/material-darker.min.css",
+  // 共有URL機能 (lz-string + QR)
+  "/web/vendor/lz-string/lz-string.min.js",
+  "/web/vendor/qrcode/qrcode.js",
   // Pyodide
   "/web/vendor/pyodide/pyodide.js",
   "/web/vendor/pyodide/pyodide.asm.js",

@@ -41,5 +41,12 @@ for f in "${CM_FILES[@]}"; do
   curl -fsSL "${CM_BASE}/${f}" -o "web/vendor/codemirror/${f}"
 done
 
+echo "== lz-string (1.5.0) + qrcode-generator (共有URL機能) =="
+mkdir -p web/vendor/lz-string web/vendor/qrcode
+curl -fsSL "https://raw.githubusercontent.com/pieroxy/lz-string/1.5.0/libs/lz-string.min.js" \
+  -o web/vendor/lz-string/lz-string.min.js
+curl -fsSL "https://raw.githubusercontent.com/kazuhikoarase/qrcode-generator/master/js/dist/qrcode.js" \
+  -o web/vendor/qrcode/qrcode.js
+
 echo "done. vendored into web/vendor/"
-du -sh web/vendor/pyodide web/vendor/codemirror 2>/dev/null || true
+du -sh web/vendor/pyodide web/vendor/codemirror web/vendor/lz-string web/vendor/qrcode 2>/dev/null || true

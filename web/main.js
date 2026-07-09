@@ -819,6 +819,69 @@ function openRevertDialog() {
 revertBtn.disabled = loadSnaps().length === 0;
 revertBtn.addEventListener("click", openRevertDialog);
 
+// --- 共有URL（コードを圧縮してURLの#に埋め込む。サーバーには何も保存されない） --
+// #以降はサーバーへ送信すらされないため、保存先の確保・削除対応が不要。
+// URLを知っている人だけが開ける。開いた側は自動実行せず、エディタに載るだけ。
+const QR_URL_MAX = 1800;   // これ以上長いURLはQR化しない（読み取りが不安定になる）
+
+function buildShareUrl(code) {
+  return location.origin + location.pathname +
+    "#code=" + LZString.compressToEncodedURIComponent(code);
+}
+
+function openShareDialog() {
+  const code = cm.getValue();
+  if (!code.trim()) {
+    setStatus("共有するコードがありません", false);
+    return;
+  }
+  const url = buildShareUrl(code);
+  const wrap = document.createElement("div");
+  const info = document.createElement("div");
+  info.textContent = "このURLを開くと、今のプログラムがエディタに読み込まれます。" +
+    "URLを知っている人だけが見られます（サーバーには保存されません）。";
+  info.style.cssText = "font-size:.85rem;color:var(--muted);margin-bottom:.6rem;line-height:1.6;";
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:.5rem;margin-bottom:.8rem;";
+  const input = document.createElement("input");
+  input.readOnly = true;
+  input.value = url;
+  input.addEventListener("focus", () => input.select());
+  const copyBtn = document.createElement("button");
+  copyBtn.textContent = "コピー";
+  copyBtn.className = "primary";
+  copyBtn.style.flex = "none";
+  copyBtn.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(url); }
+    catch { input.select(); document.execCommand("copy"); }
+    copyBtn.textContent = "コピーしました ✓";
+    setTimeout(() => { copyBtn.textContent = "コピー"; }, 1500);
+  });
+  row.append(input, copyBtn);
+  wrap.append(info, row);
+
+  if (url.length <= QR_URL_MAX) {
+    try {
+      const qr = qrcode(0, "L");   // typeNumber 0 = サイズ自動
+      qr.addData(url);
+      qr.make();
+      const img = document.createElement("img");
+      img.src = qr.createDataURL(4, 8);
+      img.alt = "共有URLのQRコード";
+      img.style.cssText = "display:block;margin:0 auto;image-rendering:pixelated;width:min(60vw,260px);";
+      wrap.append(img);
+    } catch {}   // 容量オーバー等でQR化できなくてもURLコピーは使える
+  } else {
+    const note = document.createElement("div");
+    note.textContent = "プログラムが長いためQRコードは作れません。URLをコピーして共有してください。";
+    note.style.cssText = "font-size:.85rem;color:var(--muted);";
+    wrap.append(note);
+  }
+  showModal("プログラムを共有 🔗", wrap, [{ label: "閉じる", onClick: closeModal }]);
+}
+
+$("share").addEventListener("click", openShareDialog);
+
 function showModal(title, contentNode, actions) {
   modalTitle.textContent = title;
   modalBody.innerHTML = "";
@@ -1427,8 +1490,30 @@ function onSampleClick() {
 }
 $("sample").addEventListener("click", onSampleClick);
 
+// 共有URL(#code=...)で開かれたら、その内容をエディタに読み込む。
+// リロードで再読み込みされないよう、読み込んだらハッシュは消す。
+let sharedCodeLoaded = false;
+(function maybeLoadSharedCode() {
+  const m = location.hash.match(/[#&]code=([^&]+)/);
+  if (!m) return;
+  let code = "";
+  try { code = LZString.decompressFromEncodedURIComponent(m[1]) || ""; } catch {}
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!code.trim()) {
+    log("共有URLを読み込めませんでした（URLが欠けている可能性があります）\n", "err");
+    return;
+  }
+  cm.setValue(code);
+  editorPristine = false;   // 共有されたコードは自動生成で上書きしない
+  currentName = "";
+  sharedCodeLoaded = true;
+  setStatus("共有されたプログラムを読み込みました —「Run ▶」で実行できます", true);
+  log("🔗 共有されたプログラムを読み込みました\n", "muted");
+})();
+
 // 再アクセス時：前回編集していたコードが残っていれば「続きから / 新規」を選ばせる。
 (function maybeRestoreDraft() {
+  if (sharedCodeLoaded) return;   // 共有URLで開いたときは、そのコードを優先する
   const d = loadDraft();
   if (!d || !d.edited || !d.code || !d.code.trim()) return;   // 編集実績がある時だけ
   const msg = document.createElement("div");
