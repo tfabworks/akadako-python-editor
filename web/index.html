@@ -84,7 +84,7 @@
     }
     header button {
       flex: none;   /* ボタンを縮めず、つぶれて折り返るのを防ぐ */
-      font-size: .95rem; padding: .4rem .7rem;
+      font-size: .875rem; padding: .38rem .65rem;
       background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.3); color: #fff;
     }
     header button:hover:not(:disabled) { background: rgba(255,255,255,.24); }
@@ -92,7 +92,7 @@
     @media (max-width: 1200px) {
       header { gap: .3rem; padding: .5rem .5rem; }
       header h1 { font-size: 1rem; margin-right: .4rem; }
-      header button { font-size: .85rem; padding: .3rem .5rem; }
+      header button { font-size: .8rem; padding: .3rem .5rem; }
       #save, #sample { margin-left: .6rem; }
       #vibe { margin-left: .4rem; }
     }
@@ -284,11 +284,11 @@
     <button id="connect" title="ボードに接続">Connect</button>
     <button id="run" disabled title="実行 (Ctrl+Enter)">Run ▶</button>
     <button id="stop" disabled title="停止">Stop ◼</button>
-    <button id="debug" disabled title="ステップ実行・ブレークポイント">Debug 🐞</button>
+    <button id="debug" disabled title="ステップ実行・ブレークポイント">Debug</button>
+    <button id="revert" title="前のコードに戻す（Run や AI での置き換えのたびに自動で控えます）">Undo</button>
     <button id="save" title="保存">Save</button>
     <button id="open" title="開く">Open</button>
     <button id="share" title="共有URLを作成（コードをURLに埋め込みます。サーバーには保存されません）">Share</button>
-    <button id="revert" title="前のコードに戻す（Run や AI での置き換えのたびに自動で控えます）">⏪ 戻す</button>
     <button id="sample" title="接続中のボードに合わせたサンプルコードを作成">Sample</button>
     <span id="status" class="warn">Pyodide を読み込み中…</span>
     <button id="vibe" title="Vibe Coding &amp; Assist：生成AIでプログラムを作成・エラーやコードの相談">Vibe/Assist ✨</button>
