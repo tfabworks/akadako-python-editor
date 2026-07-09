@@ -1,4 +1,4 @@
-# AkaDako Python in the browser — PoC (案A: Pyodide + Web Worker + Web MIDI)
+# AkaDako Python in the browser — PoC (Pyodide + Web Worker + Web MIDI)
 
 ブラウザだけで Python を書き・実行し、**実機の AkaDako** を制御できるかを実証する最小プロトタイプです。
 [tfabworks/akadako-python](https://github.com/tfabworks/akadako-python) を **無改造のまま** 使い、
