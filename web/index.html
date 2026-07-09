@@ -84,23 +84,29 @@
     }
     header button {
       flex: none;   /* ボタンを縮めず、つぶれて折り返るのを防ぐ */
+      font-size: .95rem; padding: .4rem .7rem;
       background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.3); color: #fff;
     }
     header button:hover:not(:disabled) { background: rgba(255,255,255,.24); }
     /* 画面が狭い時はボタン自体を一回り小さくして1行に収める */
     @media (max-width: 1200px) {
-      header { gap: .35rem; padding: .5rem .5rem; }
+      header { gap: .3rem; padding: .5rem .5rem; }
       header h1 { font-size: 1rem; margin-right: .4rem; }
-      header button { font-size: .9rem; padding: .35rem .6rem; }
-      #run .hint { display: none; }   /* (Ctrl+Enter) は省略 */
+      header button { font-size: .85rem; padding: .3rem .5rem; }
+      #save, #sample { margin-left: .6rem; }
+      #vibe { margin-left: .4rem; }
+    }
+    /* さらに狭い時はタイトルを隠してボタンを優先（タブ名で分かるため） */
+    @media (max-width: 1000px) {
+      header h1 { display: none; }
     }
     button:hover:not(:disabled) { background: #e8f0f8; }
     button:disabled { opacity: .45; cursor: default; }
     #run, .primary { background: #1e88e5; border-color: #1e88e5; color: #fff; }
     #run:hover:not(:disabled), .primary:hover:not(:disabled) { background: #2196f3; }
     #stop { color: #ffc4bc; }
-    #save { margin-left: 1.2rem; }   /* 実行系 と 保存系 の区切り */
-    #sample { margin-left: 1.2rem; } /* 保存系 と サンプル の区切り */
+    #save { margin-left: .9rem; }   /* 実行系 と 保存系 の区切り */
+    #sample { margin-left: .9rem; } /* 保存系 と サンプル の区切り */
     /* ステータスは幅が足りない時に省略記号で縮み、横スクロールを防ぐ */
     #status {
       margin-left: auto; font-size: .95rem; flex: 0 1 auto; min-width: 0;
@@ -276,7 +282,7 @@
   <header>
     <h1>AkaDako Python</h1>
     <button id="connect" title="ボードに接続">Connect</button>
-    <button id="run" disabled title="実行 (Ctrl+Enter)">Run ▶ <span class="hint">(Ctrl+Enter)</span></button>
+    <button id="run" disabled title="実行 (Ctrl+Enter)">Run ▶</button>
     <button id="stop" disabled title="停止">Stop ◼</button>
     <button id="debug" disabled title="ステップ実行・ブレークポイント">Debug 🐞</button>
     <button id="save" title="保存">Save</button>
