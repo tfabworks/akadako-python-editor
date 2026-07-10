@@ -8,7 +8,7 @@
 const CACHE = "akadako-py-v2";
 
 const PRECACHE = [
-  "/web/", "/web/index.html",
+  "/web/", "/web/index.html", "/favicon.ico",
   "/web/main.js", "/web/worker.js", "/web/pybridge.py", "/web/akadako-api.js",
   // CodeMirror
   "/web/vendor/codemirror/codemirror.min.css",
