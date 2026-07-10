@@ -44,7 +44,6 @@ const bpMap = new Uint8Array(dbgSAB, 16, BP_MAX);  // bpMap[行番号]=1 なら�
 // --- DOM --------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const consoleEl = $("console");
-const statusEl = $("status");
 const runBtn = $("run");
 const stopBtn = $("stop");
 const connectBtn = $("connect");
@@ -60,10 +59,12 @@ function log(text, cls) {
   consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
+// 状態や操作の結果は実行結果エリアに流す（ヘッダーのステータス欄は廃止。
+// ボタンが増えて手狭になったため）。ok=true は緑、false はオレンジで表示。
 function setStatus(text, ok) {
-  statusEl.textContent = text;
-  statusEl.className = ok ? "ok" : "warn";
+  log("ℹ️ " + text + "\n", ok ? "muted" : "warn");
 }
+setStatus("Pyodide を読み込み中…（初回は少し時間がかかります）", false);
 
 // Surface silent failures: route uncaught errors to both consoles.
 window.addEventListener("error", (e) => {
@@ -786,7 +787,6 @@ function restoreSnap(code) {
   lastRunError = "";
   lastRunOutput = "";
   closeModal();
-  setStatus("前に実行したコードに戻しました", true);
   log("⏪ 前に実行したコードに戻しました\n", "muted");
 }
 
@@ -1333,8 +1333,7 @@ function applyVibeResult(code, mode) {
     currentName = "";
     lastRunError = "";       // 生成後の新しいコードに古いエラーは引き継がない
     lastRunOutput = "";
-    setStatus("バイブコーディングでコードを生成しました —「Run ▶」で実行できます", true);
-    log("バイブコーディングでコードを生成しました。\n", "muted");
+    log("バイブコーディングでコードを生成しました —「Run ▶」で実行できます\n", "muted");
   };
   if (mode === "new" && !editorPristine) {
     const msg = document.createElement("div");
@@ -1507,8 +1506,7 @@ let sharedCodeLoaded = false;
   editorPristine = false;   // 共有されたコードは自動生成で上書きしない
   currentName = "";
   sharedCodeLoaded = true;
-  setStatus("共有されたプログラムを読み込みました —「Run ▶」で実行できます", true);
-  log("🔗 共有されたプログラムを読み込みました\n", "muted");
+  log("🔗 共有されたプログラムを読み込みました —「Run ▶」で実行できます\n", "muted");
 })();
 
 // 再アクセス時：前回編集していたコードが残っていれば「続きから / 新規」を選ばせる。
@@ -1545,4 +1543,3 @@ if (!crossOriginIsolated) {
 }
 
 console.log("[akadako] main.js loaded; crossOriginIsolated =", crossOriginIsolated);
-log("準備完了。crossOriginIsolated=" + crossOriginIsolated + "\n", "muted");
