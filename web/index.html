@@ -117,14 +117,21 @@
 
     main {
       flex: 1; min-height: 0; display: grid;
-      grid-template-columns: 1fr 340px;
-      grid-template-rows: 1fr 220px;
+      /* 各エリアの広さは仕切り(splitter)のドラッグで変更できる（main.js が
+         CSS変数を書き換え、localStorage に保存する） */
+      grid-template-columns: 1fr 6px var(--panel-w, 340px);
+      grid-template-rows: 1fr 6px var(--console-h, 220px);
     }
     #editorwrap { grid-column: 1; grid-row: 1; overflow: hidden; min-height: 0; background: #fff; }
+    /* ドラッグで面積を変える仕切り。ダブルクリックで初期配分に戻る */
+    .splitter { background: var(--border); touch-action: none; user-select: none; }
+    .splitter:hover, .splitter.dragging { background: var(--accent); }
+    #hsplit { grid-column: 1; grid-row: 2; cursor: row-resize; }
+    #vsplit { grid-column: 2; grid-row: 1 / span 3; cursor: col-resize; }
     .CodeMirror { height: 100%; font-size: 16px; line-height: 1.55; }
     #console-wrap {
-      grid-column: 1; grid-row: 2; position: relative; min-height: 0;
-      display: flex; border-top: 1px solid var(--border);
+      grid-column: 1; grid-row: 3; position: relative; min-height: 0;
+      display: flex;
     }
     #console {
       flex: 1; margin: 0; padding: .75rem 5rem .75rem .75rem; overflow: auto;
@@ -143,9 +150,9 @@
 
     /* 右パネル: センサーグラフ / リファレンス */
     aside#monitor {
-      grid-column: 2; grid-row: 1 / span 2; min-height: 0;
+      grid-column: 3; grid-row: 1 / span 3; min-height: 0;
       display: flex; flex-direction: column;
-      background: var(--panel); border-left: 1px solid var(--border);
+      background: var(--panel);
     }
     #tabs { display: flex; border-bottom: 1px solid var(--border); }
     #tabs .tab {
@@ -288,10 +295,12 @@
   </header>
   <main>
     <div id="editorwrap"><textarea id="editor" spellcheck="false"></textarea></div>
+    <div id="hsplit" class="splitter" title="ドラッグで広さを変更（ダブルクリックで元に戻す）"></div>
     <div id="console-wrap">
       <button id="clear">クリア</button>
       <pre id="console"></pre>
     </div>
+    <div id="vsplit" class="splitter" title="ドラッグで広さを変更（ダブルクリックで元に戻す）"></div>
     <aside id="monitor">
       <div id="tabs">
         <button id="tab-sensor" class="tab active">センサー</button>

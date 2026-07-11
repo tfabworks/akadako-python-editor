@@ -882,6 +882,59 @@ function openShareDialog() {
 
 $("share").addEventListener("click", openShareDialog);
 
+// --- 画面3分割の面積をドラッグで変更（仕切り2本。配分は端末に保存） ----------
+const LAYOUT_KEY = "akadako_layout";
+const mainEl = document.querySelector("main");
+
+function applyLayout(l) {
+  if (l.panelW) mainEl.style.setProperty("--panel-w", l.panelW + "px");
+  else mainEl.style.removeProperty("--panel-w");
+  if (l.consoleH) mainEl.style.setProperty("--console-h", l.consoleH + "px");
+  else mainEl.style.removeProperty("--console-h");
+  cm.refresh();   // CodeMirror にサイズ変更を反映
+}
+function loadLayout() {
+  try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}"); }
+  catch { return {}; }
+}
+let layout = loadLayout();
+applyLayout(layout);
+
+function initSplitter(el, isVertical) {
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    const rect = mainEl.getBoundingClientRect();
+    const onMove = (ev) => {
+      if (isVertical) {
+        // 右パネル幅: 仕切りから右端まで（狭すぎ/広すぎはクランプ）
+        layout.panelW = Math.round(Math.min(Math.max(rect.right - ev.clientX, 200), rect.width * 0.6));
+      } else {
+        // 実行結果エリアの高さ: 仕切りから下端まで
+        layout.consoleH = Math.round(Math.min(Math.max(rect.bottom - ev.clientY, 70), rect.height - 120));
+      }
+      applyLayout(layout);
+    };
+    const onUp = () => {
+      el.classList.remove("dragging");
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch {}
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  });
+  // ダブルクリック（ダブルタップ）で初期配分に戻す
+  el.addEventListener("dblclick", () => {
+    if (isVertical) delete layout.panelW; else delete layout.consoleH;
+    applyLayout(layout);
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch {}
+  });
+}
+initSplitter($("vsplit"), true);
+initSplitter($("hsplit"), false);
+
 function showModal(title, contentNode, actions) {
   modalTitle.textContent = title;
   modalBody.innerHTML = "";
