@@ -118,9 +118,10 @@
     main {
       flex: 1; min-height: 0; display: grid;
       /* 各エリアの広さは仕切り(splitter)のドラッグで変更できる（main.js が
-         CSS変数を書き換え、localStorage に保存する） */
-      grid-template-columns: 1fr 6px var(--panel-w, 340px);
-      grid-template-rows: 1fr 6px var(--console-h, 220px);
+         CSS変数を書き換え、localStorage に保存する）。
+         初期配分: 実行結果=高さの1/3、右パネル=幅の1/4 */
+      grid-template-columns: 1fr 6px var(--panel-w, 25%);
+      grid-template-rows: 1fr 6px var(--console-h, 33.333%);
     }
     #editorwrap { grid-column: 1; grid-row: 1; overflow: hidden; min-height: 0; background: #fff; }
     /* ドラッグで面積を変える仕切り。ダブルクリックで初期配分に戻る */
