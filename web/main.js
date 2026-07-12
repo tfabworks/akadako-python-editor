@@ -319,6 +319,8 @@ function fmtVal(v) {
 function ensureWatch(name) {
   let w = watches.get(name);
   if (w) return w;
+  // 最初のグラフを描き始めたら、使い方の説明文は役目を終えたので消す
+  watchlist.querySelector(".empty")?.remove();
   const row = document.createElement("div");
   row.className = "watch";
   const nameEl = document.createElement("span");
